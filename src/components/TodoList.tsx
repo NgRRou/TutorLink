@@ -37,15 +37,18 @@ interface TodoListProps {
 export function TodoList({ user }: TodoListProps) {
   const { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getStats } = useTodos(user.email);
   
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // normalize to start of today
+
   const [newTodo, setNewTodo] = useState({
     title: '',
     description: '',
     priority: 'medium' as const,
     category: 'study' as const,
-    dueDate: undefined as Date | undefined,
-    estimatedTime: 30,
+    dueDate: today,
     relatedSubject: ''
   });
+
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'today' | 'overdue'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
@@ -75,8 +78,7 @@ export function TodoList({ user }: TodoListProps) {
       description: newTodo.description,
       priority: newTodo.priority,
       category: newTodo.category,
-      dueDate: newTodo.dueDate,
-      estimatedTime: newTodo.estimatedTime,
+      dueDate: newTodo.dueDate ?? new Date(),
       relatedSubject: newTodo.relatedSubject
     });
 
@@ -85,8 +87,7 @@ export function TodoList({ user }: TodoListProps) {
       description: '',
       priority: 'medium',
       category: 'study',
-      dueDate: undefined,
-      estimatedTime: 30,
+      dueDate: new Date(),
       relatedSubject: ''
     });
     setIsAddDialogOpen(false);
@@ -117,8 +118,22 @@ export function TodoList({ user }: TodoListProps) {
     return todo.dueDate && !todo.completed && new Date(todo.dueDate) < new Date();
   };
 
+  const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
+    high: 0,
+    medium: 1,
+    low: 2
+  };
+
   const stats = getStats();
-  const filteredTodos = getFilteredTodos(filter);
+  const filteredTodos = getFilteredTodos(filter).sort((a, b) => {
+    // First: sort by status
+    const statusOrder: Record<string, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
+    if (statusOrder[a.status] !== statusOrder[b.status]) {
+      return statusOrder[a.status] - statusOrder[b.status];
+    }
+    // Then: sort by priority within same status
+    return priorityOrder[a.priority] - priorityOrder[b.priority];
+  });
 
   return (
     <div className="space-y-6">
@@ -190,18 +205,7 @@ export function TodoList({ user }: TodoListProps) {
                       id="title"
                       value={newTodo.title}
                       onChange={(e) => setNewTodo(prev => ({ ...prev, title: e.target.value }))}
-                      placeholder="e.g., Complete math homework"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="description">Description (Optional)</Label>
-                    <Textarea
-                      id="description"
-                      value={newTodo.description}
-                      onChange={(e) => setNewTodo(prev => ({ ...prev, description: e.target.value }))}
-                      placeholder="Additional details about the task"
-                      rows={3}
+                      
                     />
                   </div>
 
@@ -246,7 +250,7 @@ export function TodoList({ user }: TodoListProps) {
                   </div>
 
                   <div>
-                    <Label>Due Date (Optional)</Label>
+                    <Label>Due Date</Label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="w-full justify-start text-left font-normal">
@@ -305,13 +309,19 @@ export function TodoList({ user }: TodoListProps) {
             <div className="space-y-3">
               {filteredTodos.map((todo) => {
                 const CategoryIcon = getCategoryIcon(todo.category);
-                
+
+                // Determine background for overdue
+                const bgClass =
+                  todo.status === 'Overdue'
+                    ? 'border-red-200 bg-red-50'
+                    : todo.completed
+                    ? 'bg-gray-200'
+                    : '';
+
                 return (
                   <div
                     key={todo.id}
-                    className={`flex items-start space-x-3 p-4 border rounded-lg transition-all hover:shadow-sm ${
-                      todo.completed ? 'bg-gray-50' : ''
-                    } ${isOverdue(todo) ? 'border-red-200 bg-red-50' : ''}`}
+                    className={`flex items-start space-x-3 p-4 border rounded-lg transition-all hover:shadow-sm ${bgClass}`}
                   >
                     <Checkbox
                       checked={todo.completed}
@@ -321,43 +331,58 @@ export function TodoList({ user }: TodoListProps) {
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2 mb-2">
-                        <h4 className={`font-medium ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
+                        <h4
+                          className={`font-medium ${
+                            todo.completed ? 'line-through text-muted-foreground' : ''
+                          }`}
+                        >
                           {todo.title}
                         </h4>
-                        {isOverdue(todo) && (
-                          <Badge variant="destructive" className="text-xs">
-                            Overdue
+
+                        {/* Status Badge */}
+                        {todo.status && (
+                          <Badge
+                            variant="outline"
+                            className={`
+                              text-xs 
+                              ${todo.status === 'Overdue' ? 'bg-red-100 text-red-700' : ''}
+                              ${todo.status === 'Today' ? 'bg-blue-50 border-blue-200 font-bold' : ''}
+                              ${todo.status === 'Upcoming' ? 'bg-green-100 text-green-700' : ''}
+                              ${todo.status === 'Completed' ? 'bg-gray-100 text-gray-500' : ''}
+                            `}
+                          >
+                            {todo.status}
                           </Badge>
                         )}
                       </div>
 
                       {todo.description && (
-                        <p className={`text-sm text-muted-foreground mb-2 ${todo.completed ? 'line-through' : ''}`}>
+                        <p
+                          className={`text-sm text-muted-foreground mb-2 ${
+                            todo.completed ? 'line-through' : ''
+                          }`}
+                        >
                           {todo.description}
                         </p>
                       )}
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge className={`text-xs ${getCategoryColor(todo.category)}`}>
+                        <Badge className="text-xs bg-white border border-gray-200 text-gray-700">
                           <CategoryIcon className="h-3 w-3 mr-1" />
-                          {categories.find(c => c.value === todo.category)?.label}
+                          {categories.find((c) => c.value === todo.category)?.label}
                         </Badge>
 
-                        <Badge variant="outline" className={`text-xs ${getPriorityColor(todo.priority)}`}>
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${getPriorityColor(todo.priority)}`}
+                        >
                           {todo.priority} priority
                         </Badge>
 
                         {todo.dueDate && (
                           <div className="flex items-center text-xs text-muted-foreground">
                             <CalendarIcon className="h-3 w-3 mr-1" />
-                            {format(todo.dueDate, "MMM d")}
-                          </div>
-                        )}
-
-                        {todo.estimatedTime && (
-                          <div className="flex items-center text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {todo.estimatedTime}m
+                            {format(todo.dueDate, 'MMM d')}
                           </div>
                         )}
                       </div>

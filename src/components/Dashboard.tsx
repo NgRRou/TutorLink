@@ -103,6 +103,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   const { getTodaysTodos, toggleTodo } = useTodos(user?.email ?? '');
   const todaysTodos = getTodaysTodos();
 
+  // Define priority order
+  const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
+    high: 0,
+    medium: 1,
+    low: 2
+  };
+
+  // Define status order: Overdue first, then Today
+  const statusOrder: Record<string, number> = {
+    Overdue: 0,
+    Today: 1,
+  };
+
+  // Filter to only include Overdue + Today tasks, and sort
+  const filteredTodos = todaysTodos
+    .filter(todo => ['Today', 'Overdue'].includes(todo.status))
+    .sort((a, b) => {
+      // First by status (Overdue on top)
+      if (statusOrder[a.status] !== statusOrder[b.status]) {
+        return statusOrder[a.status] - statusOrder[b.status];
+      }
+      // Then by priority within the same status
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
+
   // Fetch user profile and progress from Supabase KV store
   useEffect(() => {
     const fetchProfileAndProgress = async () => {
@@ -468,20 +493,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                   <p className="text-xs">Add tasks with due dates to see them here</p>
                 </div>
               ) : (
-                todaysTodos.map((todo) => (
-                  <div key={todo.id} className="flex items-center space-x-3 p-2 border rounded">
-                    <Checkbox
-                      checked={todo.completed}
-                      onCheckedChange={() => handleTodoToggle(todo.id)}
-                    />
-                    <span className={`text-sm ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
-                      {todo.title}
-                    </span>
-                    {todo.priority === 'high' && (
-                      <Badge variant="destructive" className="text-xs">
-                        High
-                      </Badge>
-                    )}
+                filteredTodos.map((todo) => (
+                  <div
+                    key={todo.id}
+                    className="flex items-center justify-between space-x-3 p-2 border rounded"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        checked={todo.completed}
+                        onCheckedChange={() => handleTodoToggle(todo.id)}
+                      />
+                      <span className={`text-sm ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
+                        {todo.title}
+                      </span>
+                    </div>
+                    <Badge
+                      className={`text-xs ${
+                        todo.status === 'Overdue'
+                          ? 'bg-red-100 text-red-700'
+                          : todo.status === 'Today'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {todo.status}
+                    </Badge>
                   </div>
                 ))
               )}

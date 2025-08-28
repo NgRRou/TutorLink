@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { isToday, isBefore, startOfDay } from "date-fns";
+
+type TodoStatus = 'Overdue' | 'Today' | 'Upcoming' | 'Completed';
 
 export interface TodoItem {
   id: string;
@@ -9,7 +12,6 @@ export interface TodoItem {
   category: 'study' | 'assignment' | 'test' | 'project' | 'tutoring' | 'personal';
   dueDate?: Date;
   createdAt: Date;
-  estimatedTime?: number; // in minutes
   relatedSubject?: string;
 }
 
@@ -23,9 +25,13 @@ export function useTodos(userEmail: string) {
       const parsedTodos = JSON.parse(savedTodos).map((todo: any) => ({
         ...todo,
         dueDate: todo.dueDate ? new Date(todo.dueDate) : undefined,
-        createdAt: new Date(todo.createdAt)
+        createdAt: new Date(todo.createdAt),
+        // Remove old estimatedTime field if it exists
+        estimatedTime: undefined
       }));
       setTodos(parsedTodos);
+      // Save cleaned version back to localStorage
+      localStorage.setItem(`todos_${userEmail}`, JSON.stringify(parsedTodos));
     } else {
       // Initialize with sample todos if none exist
       const sampleTodos: TodoItem[] = [
@@ -36,9 +42,8 @@ export function useTodos(userEmail: string) {
           completed: false,
           priority: 'high',
           category: 'assignment',
-          dueDate: new Date(Date.now() + 86400000), // Tomorrow
+          dueDate: new Date(Date.now() + 86400000),
           createdAt: new Date(),
-          estimatedTime: 60,
           relatedSubject: 'Mathematics'
         },
         {
@@ -49,7 +54,6 @@ export function useTodos(userEmail: string) {
           priority: 'medium',
           category: 'study',
           createdAt: new Date(Date.now() - 86400000), // Yesterday
-          estimatedTime: 30,
           relatedSubject: 'Chemistry'
         },
         {
@@ -61,7 +65,6 @@ export function useTodos(userEmail: string) {
           category: 'test',
           dueDate: new Date(Date.now() + 2 * 86400000), // Day after tomorrow
           createdAt: new Date(),
-          estimatedTime: 90,
           relatedSubject: 'Physics'
         }
       ];
@@ -80,7 +83,8 @@ export function useTodos(userEmail: string) {
       ...todoData,
       id: Date.now().toString(),
       completed: false,
-      createdAt: new Date()
+      createdAt: new Date(),
+      dueDate: todoData.dueDate ?? startOfDay(new Date()) // default to today
     };
     setTodos(prev => [newTodo, ...prev]);
     return newTodo;
@@ -107,47 +111,72 @@ export function useTodos(userEmail: string) {
   };
 
   const getTodaysTodos = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    return todos.filter(todo => {
-      if (todo.dueDate) {
-        const dueDate = new Date(todo.dueDate);
-        dueDate.setHours(0, 0, 0, 0);
-        return dueDate.getTime() === today.getTime();
-      }
-      return false;
-    }).slice(0, 3); // Show only first 3 for dashboard
-  };
+    const today = startOfDay(new Date());
 
-  const getFilteredTodos = (filter: 'all' | 'pending' | 'completed' | 'today' | 'overdue') => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-    return todos.filter(todo => {
-      switch (filter) {
-        case 'pending':
-          return !todo.completed;
-        case 'completed':
-          return todo.completed;
-        case 'today':
-          return todo.dueDate && new Date(todo.dueDate).toDateString() === today.toDateString();
-        case 'overdue':
-          return todo.dueDate && !todo.completed && new Date(todo.dueDate) < now;
-        default:
-          return true;
-      }
-    });
+    return todos
+      .map(todo => {
+        if (!todo.dueDate) return { ...todo, status: 'Upcoming' as TodoStatus };
+
+        const due = startOfDay(todo.dueDate);
+        let status: TodoStatus = 'Upcoming';
+
+        if (!todo.completed) {
+          if (due < today) status = 'Overdue';
+          else if (due.getTime() === today.getTime()) status = 'Today';
+          else status = 'Upcoming';
+        } else {
+          status = 'Completed';
+        }
+
+        return { ...todo, status };
+      })
+      .filter(todo => todo.status === 'Overdue' || todo.status === 'Today')
+      .sort((a, b) => {
+        const order: Record<TodoStatus, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
+        return order[a.status] - order[b.status];
+      });
+  };
+  
+  const getFilteredTodos = (filter: string) => {
+    const now = startOfDay(new Date());
+
+    return todos
+      .map(todo => {
+        const due = todo.dueDate ? startOfDay(todo.dueDate) : now; // default today
+        let status: TodoStatus = 'Upcoming';
+
+        if (!todo.completed) {
+          if (isBefore(due, now)) status = 'Overdue';
+          else if (due.getTime() === now.getTime()) status = 'Today';
+          else status = 'Upcoming';
+        } else {
+          status = 'Completed';
+        }
+
+        return { ...todo, status };
+      })
+      .filter(todo => {
+        if (filter === 'all') return true;
+        if (filter === 'pending') return !todo.completed;
+        if (filter === 'completed') return todo.completed;
+        if (filter === 'today') return todo.status === 'Today';
+        if (filter === 'overdue') return todo.status === 'Overdue';
+        return true;
+      })
+      .sort((a, b) => {
+        const order: Record<TodoStatus, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
+        return order[a.status] - order[b.status];
+      });
   };
 
   const getStats = () => {
     const total = todos.length;
     const completed = todos.filter(t => t.completed).length;
     const pending = total - completed;
-    const overdue = todos.filter(t => 
-      t.dueDate && !t.completed && new Date(t.dueDate) < new Date()
+    const overdue = todos.filter(t =>
+      t.dueDate
+        ? !t.completed && isBefore(new Date(t.dueDate), startOfDay(new Date()))
+        : false
     ).length;
 
     return { total, completed, pending, overdue };
