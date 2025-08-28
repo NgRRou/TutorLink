@@ -95,5 +95,3 @@ This project was developed with the assistance of AI-powered coding tools, combi
 - **Chang Yong Qi** – Project setup, AI-assisted coding, integration, documentation.  
 - **Ng Rou Rou** – Feature refinement, debugging, and testing.  
 - **Khor Chek Lin** – UI/UX improvements, deployment, and presentation prep.  
-
-> **Note:** Around 90% of the base code was generated using AI tools, but the team worked together to refine, adapt, and finalize the solution.
