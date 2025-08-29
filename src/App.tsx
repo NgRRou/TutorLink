@@ -199,11 +199,13 @@ function AppRoutes() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const handleLogin = async (email: string, password: string) => {
     setIsLoggingIn(true);
+    console.log('Login attempt:', { email, password });
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+      console.log('Login response:', { data, error });
       if (error) {
         toast.error(`Login failed: ${error.message}`);
         setIsLoggingIn(false);
@@ -212,10 +214,15 @@ function AppRoutes() {
       if (data.session?.access_token) {
         setAccessToken(data.session.access_token);
         await fetchUserProfile(data.session.access_token);
+        const { data: userData } = await supabase.auth.getUser(data.session.access_token);
+        if (userData?.user?.user_metadata?.role === 'tutor') {
+          await supabase.from('tutor_information').update({ is_verified: true }).eq('id', userData.user.id);
+        }
         toast.success('Welcome back! Successfully logged in.');
         setRouterKey(prev => prev + 1);
         setIsLoggingIn(false);
       } else {
+        toast.error('Login failed: No access token returned.');
         setIsLoggingIn(false);
       }
     } catch (error) {
@@ -231,51 +238,94 @@ function AppRoutes() {
     email: string;
     password: string;
     role: string;
-    documents?: File[];
+    qualifications?: string[];
+    subjects?: string[];
   }) => {
     try {
       if (userData.role === 'student') {
-        const { error } = await supabase
-          .from('student_information')
-          .insert([{
-            first_name: userData.firstName,
-            last_name: userData.lastName,
-            email: userData.email,
-            password: userData.password,
-            credits: 0,
-            role: 'student',
-            experience: 0,
-            level: 1,
-            total_earnings: 0,
-            streak: 0,
-            weak_subjects: [],
-            preferred_learning_style: ''
-          }]);
-        if (error) {
-          toast.error(`Signup failed: ${error.message}`);
+        // Student signup: create user in Auth, then insert into student_information
+        const { data, error: authError } = await supabase.auth.signUp({
+          email: userData.email,
+          password: userData.password,
+          options: {
+            data: {
+              display_name: `${userData.firstName} ${userData.lastName}`,
+              first_name: userData.firstName,
+              last_name: userData.lastName,
+              role: 'student'
+            }
+          }
+        });
+        if (authError) {
+          toast.error(`Signup failed: ${authError.message}`);
+          console.error('Signup error:', authError);
+          return;
+        }
+        const userId = data?.user?.id;
+        if (!userId) {
+          toast.error('No user id returned from Auth signup. Cannot insert into student_information.');
+          return;
+        }
+        // Insert into student_information using Auth user id
+        const { error: insertError } = await supabase.from('student_information').insert([
+          { id: userId, first_name: userData.firstName, last_name: userData.lastName, email: userData.email, credits: 0, role: 'student', experience: 0, level: 1, total_earnings: 0, streak: 0, weak_subjects: [], preferred_learning_style: '' }
+        ]);
+        if (insertError) {
+          toast.error(`Failed to insert into student_information: ${insertError.message}`);
           return;
         }
         toast.success('Student account created! Please sign in.');
         setCurrentView('login');
         navigate('/login');
       } else if (userData.role === 'tutor') {
-        const { error } = await supabase
-          .from('tutor_information')
-          .insert([{
-            name: `${userData.firstName} ${userData.lastName}`,
-            rating: 0.0,
-            total_sessions: 0,
-            subjects: [],
-            qualifications: [],
-            is_favorite: false,
-            is_online: false,
-            credits_earned: 0
-          }]);
-        if (error) {
-          toast.error(`Signup failed: ${error.message}`);
+        // Tutor signup: create user in Auth, then insert into tutor_information
+        const { data, error: authError } = await supabase.auth.signUp({
+          email: userData.email,
+          password: userData.password,
+          options: {
+            data: {
+              display_name: `${userData.firstName} ${userData.lastName}`,
+              first_name: userData.firstName,
+              last_name: userData.lastName,
+              role: 'tutor',
+              subjects: userData.subjects || [],
+              qualifications: userData.qualifications || []
+            }
+          }
+        });
+        if (authError) {
+          toast.error(`Signup failed: ${authError.message}`);
           return;
         }
-        toast.success('Tutor account created! Documents uploaded for verification. Please sign in.');
+        const tutorId = data?.user?.id;
+        if (!tutorId) {
+          toast.error('No user id returned from Auth signup.');
+          return;
+        }
+        // Insert into tutor_information table
+        const { error: insertError } = await supabase.from('tutor_information').insert([
+          {
+            id: tutorId,
+            first_name: userData.firstName,
+            last_name: userData.lastName,
+            email: userData.email,
+            password: userData.password,
+            role: 'tutor',
+            rating: 0.0,
+            total_sessions: 0,
+            subjects: userData.subjects || [],
+            qualifications: userData.qualifications || [],
+            is_favorite: false,
+            is_online: false,
+            credits_earned: 0,
+            is_verified: true
+          }
+        ]);
+        if (insertError) {
+          toast.error(`Failed to insert into tutor_information: ${insertError.message}`);
+          return;
+        }
+        toast.success('Tutor account created! Please sign in.');
         setCurrentView('login');
         navigate('/login');
       }
@@ -300,11 +350,12 @@ function AppRoutes() {
   };
 
   const switchToSignup = () => {
-    setCurrentView('signup');
+    navigate('/signup');
   };
 
   const switchToLogin = () => {
     setCurrentView('login');
+    navigate('/login');
   };
 
   return (

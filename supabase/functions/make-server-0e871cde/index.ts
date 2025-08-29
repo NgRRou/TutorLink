@@ -1,7 +1,7 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { logger } from 'hono/logger'
-import { createClient } from '@supabase/supabase-js'
+import { Hono } from 'npm:hono'
+import { cors } from 'npm:hono/cors'
+import { logger } from 'npm:hono/logger'
+import { createClient } from 'jsr:@supabase/supabase-js@2.49.8'
 import * as kv from './kv_store.tsx'
 
 const app = new Hono()
@@ -15,10 +15,9 @@ app.use('*', cors({
 app.use('*', logger(console.log))
 
 // Create Supabase client with service role key
-const supabase = createClient(
-  process.env.SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string
-)
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Helper function to verify user authentication
 const verifyUser = async (accessToken: string) => {
@@ -30,12 +29,12 @@ const verifyUser = async (accessToken: string) => {
   try {
     console.log('verifyUser: Attempting to verify token')
     const { data: { user }, error } = await supabase.auth.getUser(accessToken)
-    
+
     if (error) {
       console.log(`verifyUser: Auth error: ${error.message}`)
       return { error: `Authentication failed: ${error.message}`, status: 401 }
     }
-    
+
     if (!user) {
       console.log('verifyUser: No user returned from auth')
       return { error: 'No user found', status: 401 }
@@ -43,7 +42,7 @@ const verifyUser = async (accessToken: string) => {
 
     console.log(`verifyUser: Successfully verified user ${user.id}`)
     return { user }
-    
+
   } catch (verifyError) {
     console.log(`verifyUser: Unexpected error: ${verifyError}`)
     return { error: `Authentication verification failed: ${verifyError.message}`, status: 500 }
@@ -54,7 +53,7 @@ const verifyUser = async (accessToken: string) => {
 const initializeUserProfile = async (userId: string, userData: any) => {
   try {
     console.log(`initializeUserProfile: Creating profile for user ${userId}`)
-    
+
     const profile = {
       id: userId,
       ...userData,
@@ -73,7 +72,7 @@ const initializeUserProfile = async (userId: string, userData: any) => {
     console.log('initializeUserProfile: Saving profile to KV store')
     await kv.set(`user_profile_${userId}`, profile)
     console.log('initializeUserProfile: Profile saved successfully')
-    
+
     // Initialize user progress tracking
     console.log('initializeUserProfile: Saving progress data to KV store')
     await kv.set(`user_progress_${userId}`, {
@@ -93,7 +92,7 @@ const initializeUserProfile = async (userId: string, userData: any) => {
     console.log('initializeUserProfile: Progress data saved successfully')
 
     return profile
-    
+
   } catch (initError) {
     console.log(`initializeUserProfile: Error: ${initError}`)
     throw new Error(`Failed to initialize user profile: ${initError.message}`)
@@ -153,10 +152,10 @@ app.post('/make-server-0e871cde/signup', async (c) => {
     const { data, error } = await supabase.auth.admin.createUser({
       email,
       password,
-      user_metadata: { 
-        firstName, 
-        lastName, 
-        role 
+      user_metadata: {
+        firstName,
+        lastName,
+        role
       },
       // Automatically confirm the user's email since an email server hasn't been configured.
       email_confirm: true
@@ -175,7 +174,7 @@ app.post('/make-server-0e871cde/signup', async (c) => {
       role
     })
 
-    return c.json({ 
+    return c.json({
       message: 'User created successfully',
       user: profile
     })
@@ -190,24 +189,24 @@ app.post('/make-server-0e871cde/signup', async (c) => {
 app.get('/make-server-0e871cde/profile', async (c) => {
   try {
     console.log('Profile endpoint called')
-    
+
     const accessToken = c.req.header('Authorization')?.replace('Bearer ', '')
     console.log('Access token present:', !!accessToken)
-    
+
     if (!accessToken) {
       console.log('No access token provided')
       return c.json({ error: 'No access token provided' }, 401)
     }
-    
+
     const authResult = await verifyUser(accessToken ?? '')
     console.log('Auth result:', authResult.error ? `Error: ${authResult.error}` : 'Success')
-    
+
     if (authResult.error) {
       return c.json({ error: authResult.error }, (authResult.status as any) || 401)
     }
 
     console.log(`Fetching profile for user: ${authResult.user?.id}`)
-    
+
     // Get user profile from KV store
     let profile
     try {
@@ -221,7 +220,7 @@ app.get('/make-server-0e871cde/profile', async (c) => {
       console.log(`KV store error: ${kvError}`)
       throw new Error(`KV store error: ${kvError}`)
     }
-    
+
     // If profile doesn't exist, create one from user metadata
     if (!profile) {
       if (!authResult.user) {
@@ -229,16 +228,16 @@ app.get('/make-server-0e871cde/profile', async (c) => {
         return c.json({ error: 'User information is missing from authentication result' }, 500)
       }
       console.log(`Creating missing profile for user ${authResult.user.id}`)
-      
+
       const userData = {
         firstName: authResult.user.user_metadata?.firstName || 'User',
         lastName: authResult.user.user_metadata?.lastName || '',
         email: authResult.user.email || '',
         role: authResult.user.user_metadata?.role || 'student'
       }
-      
+
       console.log('User data for profile creation:', userData)
-      
+
       try {
         profile = await initializeUserProfile(authResult.user.id, userData)
         console.log('Profile created successfully')
@@ -268,7 +267,7 @@ app.get('/make-server-0e871cde/profile', async (c) => {
   } catch (error) {
     console.log(`Profile fetch error: ${error}`)
     console.log(`Error stack: ${error.stack}`)
-    return c.json({ 
+    return c.json({
       error: 'Internal server error while fetching profile',
       details: error.message,
       timestamp: new Date().toISOString()
@@ -281,7 +280,7 @@ app.post('/make-server-0e871cde/ai-tutor/chat', async (c) => {
   try {
     const accessToken = c.req.header('Authorization')?.replace('Bearer ', '')
     const authResult = await verifyUser(accessToken ?? '')
-    
+
     if (authResult.error) {
       return c.json({ error: authResult.error }, authResult.status as any)
     }
@@ -306,10 +305,10 @@ app.post('/make-server-0e871cde/ai-tutor/chat', async (c) => {
 
     // Check if user has enough credits (1 credit per AI interaction)
     if (profile.credits < 1) {
-      return c.json({ 
+      return c.json({
         error: 'Insufficient credits',
         suggestPurchase: true,
-        currentCredits: profile.credits 
+        currentCredits: profile.credits
       }, 402)
     }
 
@@ -335,7 +334,7 @@ app.post('/make-server-0e871cde/ai-tutor/chat', async (c) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY!
+        'x-goog-api-key': Deno.GEMINI_API_KEY!
       },
       body: JSON.stringify({
         contents: [{
@@ -381,12 +380,12 @@ app.post('/make-server-0e871cde/ai-tutor/chat', async (c) => {
       difficulty,
       creditsUsed: 1
     })
-    
+
     // Keep only last 50 messages
     if (chatHistory.length > 50) {
       chatHistory.splice(0, chatHistory.length - 50)
     }
-    
+
     await kv.set(`chat_history_${authResult.user.id}`, chatHistory)
 
     return c.json({
@@ -407,7 +406,7 @@ app.get('/make-server-0e871cde/ai-tutor/history', async (c) => {
   try {
     const accessToken = c.req.header('Authorization')?.replace('Bearer ', '')
     const authResult = await verifyUser(accessToken ?? '')
-    
+
     if (authResult.error) {
       return c.json({ error: authResult.error }, authResult.status as any)
     }
@@ -430,7 +429,7 @@ app.post('/make-server-0e871cde/credits/purchase', async (c) => {
   try {
     const accessToken = c.req.header('Authorization')?.replace('Bearer ', '')
     const authResult = await verifyUser(accessToken ?? '')
-    
+
     if (authResult.error) {
       return c.json({ error: authResult.error }, authResult.status as any)
     }
@@ -522,20 +521,20 @@ app.get('/make-server-0e871cde/health', async (c) => {
     const testValue = { test: true, timestamp: new Date().toISOString() }
     await kv.set(testKey, testValue)
     const retrieved = await kv.get(testKey)
-    
+
     // Clean up test data
     await kv.del(testKey)
-    
-    return c.json({ 
-      status: 'ok', 
+
+    return c.json({
+      status: 'ok',
       timestamp: new Date().toISOString(),
       kvStore: retrieved ? 'connected' : 'error',
       supabase: 'connected'
     })
   } catch (error) {
     console.log('Health check error:', error)
-    return c.json({ 
-      status: 'degraded', 
+    return c.json({
+      status: 'degraded',
       timestamp: new Date().toISOString(),
       error: error.message,
       kvStore: 'error',
@@ -544,4 +543,4 @@ app.get('/make-server-0e871cde/health', async (c) => {
   }
 })
 
-export default app.fetch
+Deno.serve(app.fetch);

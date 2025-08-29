@@ -55,6 +55,7 @@ import { Notifications } from "./Notifications";
 import { Meeting } from "./Meeting";
 import { CalendarTimetable } from "./CalendarTimetable";
 import { PeerLearning } from "./PeerLearning";
+import { TutorDocumentUpload } from "./TutorDocumentUpload";
 import { useTodos } from "../hooks/useTodos";
 import { toast } from "sonner";
 import {
@@ -508,13 +509,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                       </span>
                     </div>
                     <Badge
-                      className={`text-xs ${
-                        todo.status === 'Overdue'
+                      className={`text-xs ${todo.status === 'Overdue'
                           ? 'bg-red-100 text-red-700'
                           : todo.status === 'Today'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}
                     >
                       {todo.status}
                     </Badge>
@@ -533,6 +533,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
         </Card>
       </div>
 
+      {/* Tutor Document Upload Widget (only for tutors) */}
+      {user?.role === 'tutor' && (
+        <TutorDocumentUpload userId={user.id} />
+      )}
       {/* Quick Actions */}
       <Card>
         <CardHeader>

@@ -18,26 +18,28 @@ export function LoginForm({ onLogin, onSwitchToSignup }: LoginFormProps) {
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
-    
+
     if (!email) {
       newErrors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(email)) {
       newErrors.email = 'Please enter a valid email';
     }
-    
+
     if (!password) {
       newErrors.password = 'Password is required';
     } else if (password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('LoginForm handleSubmit called');
     if (validateForm()) {
+      console.log('LoginForm calling onLogin with:', { email, password });
       onLogin(email, password);
     }
   };
@@ -70,7 +72,7 @@ export function LoginForm({ onLogin, onSwitchToSignup }: LoginFormProps) {
                 <p className="text-sm text-destructive">{errors.email}</p>
               )}
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -99,7 +101,7 @@ export function LoginForm({ onLogin, onSwitchToSignup }: LoginFormProps) {
               Sign In
             </Button>
           </form>
-          
+
           <div className="mt-6 text-center">
             <p className="text-sm text-muted-foreground">
               Don't have an account?{' '}

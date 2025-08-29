@@ -1,15 +1,15 @@
 import React from 'react';
 import { Button } from "./ui/button";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuLabel, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
 } from "./ui/dropdown-menu";
 import { Badge } from "./ui/badge";
-import { 
+import {
   Menu,
   Bot,
   Coins,
@@ -38,8 +38,21 @@ interface FeatureNavigationProps {
   userRole: string; // Add user role
 }
 
+
+type FeatureItem = {
+  id: string;
+  label: string;
+  icon: any;
+  badge?: string;
+};
+
+type FeatureCategory = {
+  category: string;
+  items: FeatureItem[];
+};
+
 export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits, userRole }: FeatureNavigationProps) {
-  const studentFeatures = [
+  const studentFeatures: FeatureCategory[] = [
     {
       category: "Learning",
       items: [
@@ -74,7 +87,7 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
     }
   ];
 
-  const tutorFeatures = [
+  const tutorFeatures: FeatureCategory[] = [
     {
       category: "Teaching",
       items: [
@@ -119,7 +132,7 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        
+
         {features.map((category) => (
           <div key={category.category}>
             <DropdownMenuLabel className="text-xs text-muted-foreground px-2 py-1">
@@ -131,9 +144,8 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
                 <DropdownMenuItem
                   key={item.id}
                   onClick={() => onFeatureSelect(item.id)}
-                  className={`flex items-center space-x-2 ${
-                    currentFeature === item.id ? 'bg-accent' : ''
-                  }`}
+                  className={`flex items-center space-x-2 ${currentFeature === item.id ? 'bg-accent' : ''
+                    }`}
                 >
                   <IconComponent className="h-4 w-4" />
                   <span className="flex-1">{item.label}</span>
