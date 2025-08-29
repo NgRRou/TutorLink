@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
 
-
 // --- INTERFACES ---
 interface User {
   id: string;
@@ -83,11 +82,6 @@ import {
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
 
-
-
-
-
-
 interface DashboardProps {
   onLogout: () => void;
   accessToken: string;
@@ -99,9 +93,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null);
   const [currentFeature, setCurrentFeature] = useState('overview');
 
-  // Use the shared todos hook
-  const { getTodaysTodos, toggleTodo } = useTodos(user?.email ?? '');
-  const todaysTodos = getTodaysTodos();
+  const { todos, toggleTodo, getTodaysTodos } = useTodos(user?.email ?? '');
+  const todaysTodos = getTodaysTodos(); 
 
   // Define priority order
   const priorityOrder: Record<'high' | 'medium' | 'low', number> = {

@@ -10,6 +10,11 @@ import { Toaster } from "./components/ui/sonner";
 import { supabase } from "./utils/supabase/client";
 import { projectId, publicAnonKey } from './utils/supabase/info';
 import { TutorSessions } from "./components/TutorSessions";
+import { GoogleOAuthProvider } from "@react-oauth/google";
+import rateLimit from 'express-rate-limit';
+import express from 'express';
+
+const CLIENT_ID = "946439376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com"; 
 
 interface User {
   id: string;
@@ -352,8 +357,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <Router>
-      <AppRoutes />
-    </Router>
+    <GoogleOAuthProvider clientId={CLIENT_ID}>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </GoogleOAuthProvider>
   );
 }

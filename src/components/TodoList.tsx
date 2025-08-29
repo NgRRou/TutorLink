@@ -35,14 +35,13 @@ interface TodoListProps {
 }
 
 export function TodoList({ user }: TodoListProps) {
-  const { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getStats } = useTodos(user.email);
+  const { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getStats, refreshTodos } = useTodos(user.email);
   
   const today = new Date();
   today.setHours(0, 0, 0, 0); // normalize to start of today
 
   const [newTodo, setNewTodo] = useState({
     title: '',
-    description: '',
     priority: 'medium' as const,
     category: 'study' as const,
     dueDate: today,
@@ -75,7 +74,6 @@ export function TodoList({ user }: TodoListProps) {
 
     addTodo({
       title: newTodo.title,
-      description: newTodo.description,
       priority: newTodo.priority,
       category: newTodo.category,
       dueDate: newTodo.dueDate ?? new Date(),
@@ -84,7 +82,6 @@ export function TodoList({ user }: TodoListProps) {
 
     setNewTodo({
       title: '',
-      description: '',
       priority: 'medium',
       category: 'study',
       dueDate: new Date(),
@@ -92,6 +89,7 @@ export function TodoList({ user }: TodoListProps) {
     });
     setIsAddDialogOpen(false);
     toast.success('Task added successfully!');
+    refreshTodos();
   };
 
   const handleDeleteTodo = (id: string) => {
@@ -355,16 +353,6 @@ export function TodoList({ user }: TodoListProps) {
                           </Badge>
                         )}
                       </div>
-
-                      {todo.description && (
-                        <p
-                          className={`text-sm text-muted-foreground mb-2 ${
-                            todo.completed ? 'line-through' : ''
-                          }`}
-                        >
-                          {todo.description}
-                        </p>
-                      )}
 
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge className="text-xs bg-white border border-gray-200 text-gray-700">
