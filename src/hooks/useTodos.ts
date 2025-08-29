@@ -6,7 +6,6 @@ type TodoStatus = 'Overdue' | 'Today' | 'Upcoming' | 'Completed';
 export interface TodoItem {
   id: string;
   title: string;
-  description: string;
   completed: boolean;
   priority: 'low' | 'medium' | 'high';
   category: 'study' | 'assignment' | 'test' | 'project' | 'tutoring' | 'personal';
@@ -23,11 +22,14 @@ export function useTodos(userEmail: string) {
     const savedTodos = localStorage.getItem(`todos_${userEmail}`);
     if (savedTodos) {
       const parsedTodos = JSON.parse(savedTodos).map((todo: any) => ({
-        ...todo,
+        id: todo.id,
+        title: todo.title,
+        completed: todo.completed,
+        priority: todo.priority,
+        category: todo.category,
         dueDate: todo.dueDate ? new Date(todo.dueDate) : undefined,
         createdAt: new Date(todo.createdAt),
-        // Remove old estimatedTime field if it exists
-        estimatedTime: undefined
+        relatedSubject: todo.relatedSubject
       }));
       setTodos(parsedTodos);
       // Save cleaned version back to localStorage
@@ -38,7 +40,6 @@ export function useTodos(userEmail: string) {
         {
           id: '1',
           title: 'Complete Math homework',
-          description: 'Solve Chapter 5 exercises',
           completed: false,
           priority: 'high',
           category: 'assignment',
@@ -49,17 +50,16 @@ export function useTodos(userEmail: string) {
         {
           id: '2',
           title: 'Review Chemistry notes',
-          description: 'Go through organic chemistry concepts',
           completed: true,
           priority: 'medium',
           category: 'study',
-          createdAt: new Date(Date.now() - 86400000), // Yesterday
+          dueDate: new Date(),
+          createdAt: new Date(), 
           relatedSubject: 'Chemistry'
         },
         {
           id: '3',
           title: 'Prepare for Physics test',
-          description: 'Study kinematics and dynamics',
           completed: false,
           priority: 'high',
           category: 'test',
@@ -137,12 +137,18 @@ export function useTodos(userEmail: string) {
       });
   };
   
+  const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
+    high: 0,
+    medium: 1,
+    low: 2
+  };
+
   const getFilteredTodos = (filter: string) => {
     const now = startOfDay(new Date());
 
     return todos
       .map(todo => {
-        const due = todo.dueDate ? startOfDay(todo.dueDate) : now; // default today
+        const due = todo.dueDate ? startOfDay(todo.dueDate) : now;
         let status: TodoStatus = 'Upcoming';
 
         if (!todo.completed) {
@@ -164,8 +170,13 @@ export function useTodos(userEmail: string) {
         return true;
       })
       .sort((a, b) => {
-        const order: Record<TodoStatus, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
-        return order[a.status] - order[b.status];
+        // First: sort by status
+        const statusOrder: Record<TodoStatus, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
+        if (statusOrder[a.status] !== statusOrder[b.status]) {
+          return statusOrder[a.status] - statusOrder[b.status];
+        }
+        // Then: sort by priority within same status
+        return priorityOrder[a.priority] - priorityOrder[b.priority];
       });
   };
 
