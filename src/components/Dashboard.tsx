@@ -55,7 +55,7 @@ import { Meeting } from "./Meeting";
 import { CalendarTimetable } from "./CalendarTimetable";
 import { PeerLearning } from "./PeerLearning";
 import { TutorDocumentUpload } from "./TutorDocumentUpload";
-import { useTodos } from "../hooks/useTodos";
+import { useTodosContext, TodosProvider } from "../hooks/TodosContext";
 import { toast } from "sonner";
 import {
   BookOpen,
@@ -94,8 +94,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null);
   const [currentFeature, setCurrentFeature] = useState('overview');
 
-  const { todos, toggleTodo, getTodaysTodos } = useTodos(user?.email ?? '');
-  const todaysTodos = getTodaysTodos(); 
+  // Use TodosContext for shared state
+  const { todos, toggleTodo, getTodaysTodos } = useTodosContext();
+  const todaysTodos = getTodaysTodos();
 
   // Define priority order
   const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
@@ -112,11 +113,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
   // Filter to only include Overdue + Today tasks, and sort
   const filteredTodos = todaysTodos
-    .filter(todo => ['Today', 'Overdue'].includes(todo.status))
+    .filter(todo => ['Today', 'Overdue'].includes(todo.status ?? ''))
     .sort((a, b) => {
+      const aStatus = a.status ?? '';
+      const bStatus = b.status ?? '';
       // First by status (Overdue on top)
-      if (statusOrder[a.status] !== statusOrder[b.status]) {
-        return statusOrder[a.status] - statusOrder[b.status];
+      if (statusOrder[aStatus] !== statusOrder[bStatus]) {
+        return (statusOrder[aStatus] ?? 99) - (statusOrder[bStatus] ?? 99);
       }
       // Then by priority within the same status
       return priorityOrder[a.priority] - priorityOrder[b.priority];
@@ -494,19 +497,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                   >
                     <div className="flex items-center space-x-2">
                       <Checkbox
-                        checked={todo.completed}
+                        checked={todo.is_completed}
                         onCheckedChange={() => handleTodoToggle(todo.id)}
                       />
-                      <span className={`text-sm ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
+                      <span className={`text-sm ${todo.is_completed ? 'line-through text-muted-foreground' : ''}`}>
                         {todo.title}
                       </span>
                     </div>
                     <Badge
                       className={`text-xs ${todo.status === 'Overdue'
-                          ? 'bg-red-100 text-red-700'
-                          : todo.status === 'Today'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-100 text-gray-700'
+                        ? 'bg-red-100 text-red-700'
+                        : todo.status === 'Today'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-700'
                         }`}
                     >
                       {todo.status}
@@ -825,64 +828,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <BookOpen className="h-8 w-8 text-blue-600" />
-              <h1>TutorPlatform</h1>
-
-              {/* Feature Navigation */}
-              <FeatureNavigation
-                onFeatureSelect={setCurrentFeature}
-                currentFeature={currentFeature}
-                userCredits={user.credits}
-                userRole={user.role}
-              />
-            </div>
-
-            <div className="flex items-center space-x-4">
-              <Notifications />
-
-              <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-50 rounded-full">
-                <Coins className="h-4 w-4 text-yellow-600" />
-                <span className="text-sm font-medium text-yellow-700">{user.credits}</span>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback>{getInitials(user.first_name, user.last_name)}</AvatarFallback>
-                </Avatar>
-                <div className="hidden md:block">
-                  <p className="text-sm">{user.first_name} {user.last_name}</p>
-                  <div className="flex items-center space-x-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {getRoleDisplay(user.role)}
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      Level {user.level}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setCurrentFeature('profile')}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-
-              <Button variant="ghost" size="sm" onClick={onLogout}>
-                <LogOut className="h-4 w-4" />
-                Logout
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

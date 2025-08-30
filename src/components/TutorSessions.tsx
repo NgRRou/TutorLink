@@ -102,28 +102,6 @@ interface TutorSessionsProps {
 }
 
 export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
-  // Minimal UI for uploading verification document (for demo)
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
-
-  // File upload handler must be inside the component to access state
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !demoTutorId) return;
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const url = await uploadVerificationDocument(file, demoTutorId, supabaseClient);
-      setUploadedUrl(url);
-      toast.success('Document uploaded and saved!');
-    } catch (err: any) {
-      setUploadError(err.message || 'Upload failed');
-      toast.error(err.message || 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
 
   // Thank you dialog state
   const [showThankYou, setShowThankYou] = useState(false);
@@ -564,18 +542,6 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
           </div>
         </div>
       )}
-      {/* Demo: Upload Verification Document */}
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle>Upload Verification Document (Demo)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <input type="file" accept="application/pdf,image/*" onChange={handleFileChange} disabled={uploading} />
-          {uploading && <div className="text-blue-600 mt-2">Uploading...</div>}
-          {uploadError && <div className="text-red-600 mt-2">{uploadError}</div>}
-          {uploadedUrl && <div className="text-green-600 mt-2">Uploaded: <a href={uploadedUrl} target="_blank" rel="noopener noreferrer">View Document</a></div>}
-        </CardContent>
-      </Card>
       {/* Header */}
       <Card>
         <CardHeader>

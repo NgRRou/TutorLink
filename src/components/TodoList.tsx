@@ -10,11 +10,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from "./ui/label";
 import { Calendar } from "./ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { toast } from "sonner@2.0.3";
-import { useTodos, type TodoItem } from "../hooks/useTodos";
-import { 
-  CheckSquare, 
-  Plus, 
+import { toast } from "sonner";
+import { useTodosContext } from "../hooks/TodosContext";
+import { type TodoItem, CATEGORY_OPTIONS } from "../hooks/useTodos";
+import {
+  CheckSquare,
+  Plus,
   Calendar as CalendarIcon,
   Clock,
   Tag,
@@ -30,34 +31,37 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
+
 interface TodoListProps {
-  user: any;
+  user: { id: string };
 }
 
-export function TodoList({ user }: TodoListProps) {
-  const { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getStats, refreshTodos } = useTodos(user.email);
-  
+export const TodoList: React.FC<TodoListProps> = ({ user }) => {
+  const { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getStats, setUserId } = useTodosContext();
+  // Update context userId if it changes
+  React.useEffect(() => {
+    setUserId(user.id);
+  }, [user.id, setUserId]);
   const today = new Date();
   today.setHours(0, 0, 0, 0); // normalize to start of today
 
   const [newTodo, setNewTodo] = useState({
     title: '',
     priority: 'medium' as const,
-    category: 'study' as const,
-    dueDate: today,
-    relatedSubject: ''
+    category: CATEGORY_OPTIONS[0],
+    dueDate: today
   });
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'today' | 'overdue'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
   const categories = [
-    { value: 'study', label: 'Study Session', icon: Book, color: 'bg-blue-100 text-blue-700' },
-    { value: 'assignment', label: 'Assignment', icon: Edit, color: 'bg-green-100 text-green-700' },
-    { value: 'test', label: 'Test/Exam', icon: Brain, color: 'bg-red-100 text-red-700' },
-    { value: 'project', label: 'Project', icon: Target, color: 'bg-purple-100 text-purple-700' },
-    { value: 'tutoring', label: 'Tutoring', icon: Users, color: 'bg-orange-100 text-orange-700' },
-    { value: 'personal', label: 'Personal', icon: Star, color: 'bg-gray-100 text-gray-700' }
+    { value: 'Study Session', label: 'Study Session', icon: Book, color: 'bg-blue-100 text-blue-700' },
+    { value: 'Assignment', label: 'Assignment', icon: Edit, color: 'bg-green-100 text-green-700' },
+    { value: 'Test/Exam', label: 'Test/Exam', icon: Brain, color: 'bg-red-100 text-red-700' },
+    { value: 'Project', label: 'Project', icon: Target, color: 'bg-purple-100 text-purple-700' },
+    { value: 'Tutoring', label: 'Tutoring', icon: Users, color: 'bg-orange-100 text-orange-700' },
+    { value: 'Personal', label: 'Personal', icon: Star, color: 'bg-gray-100 text-gray-700' }
   ];
 
   const priorities = [
@@ -71,25 +75,21 @@ export function TodoList({ user }: TodoListProps) {
       toast.error('Please enter a task title');
       return;
     }
-
     addTodo({
       title: newTodo.title,
       priority: newTodo.priority,
       category: newTodo.category,
       dueDate: newTodo.dueDate ?? new Date(),
-      relatedSubject: newTodo.relatedSubject
+      user_id: user.id
     });
-
     setNewTodo({
       title: '',
       priority: 'medium',
-      category: 'study',
-      dueDate: new Date(),
-      relatedSubject: ''
+      category: CATEGORY_OPTIONS[0],
+      dueDate: new Date()
     });
     setIsAddDialogOpen(false);
     toast.success('Task added successfully!');
-    refreshTodos();
   };
 
   const handleDeleteTodo = (id: string) => {
@@ -113,7 +113,7 @@ export function TodoList({ user }: TodoListProps) {
   };
 
   const isOverdue = (todo: TodoItem) => {
-    return todo.dueDate && !todo.completed && new Date(todo.dueDate) < new Date();
+    return todo.dueDate && !todo.is_completed && new Date(todo.dueDate) < new Date();
   };
 
   const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
@@ -126,8 +126,10 @@ export function TodoList({ user }: TodoListProps) {
   const filteredTodos = getFilteredTodos(filter).sort((a, b) => {
     // First: sort by status
     const statusOrder: Record<string, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
-    if (statusOrder[a.status] !== statusOrder[b.status]) {
-      return statusOrder[a.status] - statusOrder[b.status];
+    const aStatus = a.status ?? '';
+    const bStatus = b.status ?? '';
+    if (statusOrder[aStatus] !== statusOrder[bStatus]) {
+      return (statusOrder[aStatus] ?? 99) - (statusOrder[bStatus] ?? 99);
     }
     // Then: sort by priority within same status
     return priorityOrder[a.priority] - priorityOrder[b.priority];
@@ -195,7 +197,7 @@ export function TodoList({ user }: TodoListProps) {
                     Create a new task to help organize your studies
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="title">Task Title</Label>
@@ -203,25 +205,23 @@ export function TodoList({ user }: TodoListProps) {
                       id="title"
                       value={newTodo.title}
                       onChange={(e) => setNewTodo(prev => ({ ...prev, title: e.target.value }))}
-                      
+
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label>Category</Label>
-                      <Select 
-                        value={newTodo.category} 
+                      <Select
+                        value={newTodo.category}
                         onValueChange={(value: any) => setNewTodo(prev => ({ ...prev, category: value }))}
                       >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map(cat => (
-                            <SelectItem key={cat.value} value={cat.value}>
-                              {cat.label}
-                            </SelectItem>
+                          {CATEGORY_OPTIONS.map(opt => (
+                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -229,8 +229,8 @@ export function TodoList({ user }: TodoListProps) {
 
                     <div>
                       <Label>Priority</Label>
-                      <Select 
-                        value={newTodo.priority} 
+                      <Select
+                        value={newTodo.priority}
                         onValueChange={(value: any) => setNewTodo(prev => ({ ...prev, priority: value }))}
                       >
                         <SelectTrigger>
@@ -271,8 +271,8 @@ export function TodoList({ user }: TodoListProps) {
                     <Button onClick={handleAddTodo} className="flex-1">
                       Add Task
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setIsAddDialogOpen(false)}
                       className="flex-1"
                     >
@@ -312,9 +312,9 @@ export function TodoList({ user }: TodoListProps) {
                 const bgClass =
                   todo.status === 'Overdue'
                     ? 'border-red-200 bg-red-50'
-                    : todo.completed
-                    ? 'bg-gray-200'
-                    : '';
+                    : todo.is_completed
+                      ? 'bg-gray-200'
+                      : '';
 
                 return (
                   <div
@@ -322,7 +322,7 @@ export function TodoList({ user }: TodoListProps) {
                     className={`flex items-start space-x-3 p-4 border rounded-lg transition-all hover:shadow-sm ${bgClass}`}
                   >
                     <Checkbox
-                      checked={todo.completed}
+                      checked={todo.is_completed}
                       onCheckedChange={() => toggleTodo(todo.id)}
                       className="mt-1"
                     />
@@ -330,9 +330,8 @@ export function TodoList({ user }: TodoListProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2 mb-2">
                         <h4
-                          className={`font-medium ${
-                            todo.completed ? 'line-through text-muted-foreground' : ''
-                          }`}
+                          className={`font-medium ${todo.is_completed ? 'line-through text-muted-foreground' : ''
+                            }`}
                         >
                           {todo.title}
                         </h4>
@@ -431,4 +430,5 @@ export function TodoList({ user }: TodoListProps) {
       </Card>
     </div>
   );
-}
+};
+

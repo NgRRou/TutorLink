@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -52,11 +53,17 @@ type FeatureCategory = {
 };
 
 export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits, userRole }: FeatureNavigationProps) {
+  const navigate = useNavigate();
   const studentFeatures: FeatureCategory[] = [
+    {
+      category: "General",
+      items: [
+        { id: 'overview', label: 'Dashboard', icon: BarChart3 },
+      ]
+    },
     {
       category: "Learning",
       items: [
-        { id: 'overview', label: 'Dashboard Overview', icon: BarChart3 },
         { id: 'ai-tutor', label: 'AI Tutor Assistant', icon: Bot, badge: 'Smart' },
         { id: 'personalized-test', label: 'Personalized Tests', icon: FileText },
         { id: 'past-papers', label: 'Past Year Papers', icon: BookOpen },
@@ -66,7 +73,7 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
       category: "Tutoring",
       items: [
         { id: 'tutor-sessions', label: 'Tutor Sessions', icon: Video },
-        { id: 'file-sharing', label: 'File Sharing', icon: Upload },
+        // File Sharing feature removed
       ]
     },
     {
@@ -89,9 +96,14 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
 
   const tutorFeatures: FeatureCategory[] = [
     {
+      category: "General",
+      items: [
+        { id: 'overview', label: 'Dashboard', icon: BarChart3 },
+      ]
+    },
+    {
       category: "Teaching",
       items: [
-        { id: 'overview', label: 'Dashboard Overview', icon: BarChart3 },
         { id: 'tutor-sessions', label: 'Tutor Sessions', icon: Video },
       ]
     },
@@ -112,6 +124,21 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
       if (feature) return feature.label;
     }
     return 'Dashboard';
+  };
+
+  // Map feature id to route path
+  const featureRouteMap: Record<string, string> = {
+    'overview': '/dashboard',
+    'ai-tutor': '/ai-tutor-assistant',
+    'personalized-test': '/personalized-test',
+    'past-papers': '/past-papers',
+    'tutor-sessions': '/tutor-sessions',
+    'leaderboard': '/leaderboard',
+    'peer-groups': '/peer-learning-groups',
+    'credits': '/credits',
+    'calendar': '/calendar-timetable',
+    'todo-list': '/todo-list',
+    'profile': '/profile-settings',
   };
 
   return (
@@ -143,9 +170,11 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
               return (
                 <DropdownMenuItem
                   key={item.id}
-                  onClick={() => onFeatureSelect(item.id)}
-                  className={`flex items-center space-x-2 ${currentFeature === item.id ? 'bg-accent' : ''
-                    }`}
+                  onClick={() => {
+                    const route = featureRouteMap[item.id] || '/dashboard';
+                    navigate(route);
+                  }}
+                  className={`flex items-center space-x-2 ${currentFeature === item.id ? 'bg-accent' : ''}`}
                 >
                   <IconComponent className="h-4 w-4" />
                   <span className="flex-1">{item.label}</span>

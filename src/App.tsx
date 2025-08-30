@@ -1,20 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Meeting } from './components/Meeting';
 import { LoginForm } from "./components/LoginForm";
 import { SignupForm } from "./components/SignupForm";
 import { Dashboard } from "./components/Dashboard";
-import { LoadingScreen } from "./components/LoadingScreen";
+import { PersonalizedTest } from "./components/PersonalizedTest";
+import { Leaderboard } from "./components/Leaderboard";
+import { TodoList } from "./components/TodoList";
+import { TodosProvider } from "./hooks/TodosContext";
+import { PastYearPapers } from "./components/PastYearPapers";
+import { CalendarTimetable } from "./components/CalendarTimetable";
+import { PeerLearning } from "./components/PeerLearning";
+import { CreditsManager } from "./components/CreditsManager";
+import { AITutor } from "./components/AITutor";
+import { FeatureNavigation } from "./components/FeatureNavigation";
+import { Notifications } from "./components/Notifications";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { Coins, BookOpen, Settings, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 import { supabase } from "./utils/supabase/client";
-import { projectId, publicAnonKey } from './utils/supabase/info';
 import { TutorSessions } from "./components/TutorSessions";
 import { GoogleOAuthProvider } from "@react-oauth/google";
-import rateLimit from 'express-rate-limit';
-import express from 'express';
+import ProfileSettings from './components/ProfileSettings';
 
-const CLIENT_ID = "946439376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com"; 
+const CLIENT_ID = "946439376376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com";
 
 interface User {
   id: string;
@@ -32,185 +44,149 @@ interface User {
   preferred_learning_style: string;
 }
 
-type AuthView = 'login' | 'signup' | 'dashboard' | 'loading';
-
+function Layout({ user, onLogout, accessToken }: { user: User, onLogout: () => void, accessToken: string }) {
+  const location = useLocation();
+  const pathToFeatureId: Record<string, string> = {
+    '/dashboard': 'overview',
+    '/ai-tutor-assistant': 'ai-tutor',
+    '/personalized-test': 'personalized-test',
+    '/past-papers': 'past-papers',
+    '/tutor-sessions': 'tutor-sessions',
+    '/leaderboard': 'leaderboard',
+    '/peer-learning-groups': 'peer-groups',
+    '/credits': 'credits',
+    '/calendar-timetable': 'calendar',
+    '/todo-list': 'todo-list',
+    '/profile-settings': 'profile',
+  };
+  let pathname = location.pathname;
+  if (pathname.startsWith('/meeting/')) pathname = '/meeting/:sessionId';
+  const currentFeature = pathToFeatureId[pathname] || 'overview';
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <BookOpen className="h-8 w-8 text-blue-600" />
+              <h1>TutorPlatform</h1>
+              <FeatureNavigation
+                onFeatureSelect={() => { }}
+                currentFeature={currentFeature}
+                userCredits={user?.credits || 0}
+                userRole={user?.role || "student"}
+              />
+            </div>
+            <div className="flex items-center space-x-4">
+              <Notifications />
+              <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-50 rounded-full">
+                <Coins className="h-4 w-4 text-yellow-600" />
+                <span className="text-sm font-medium text-yellow-700">{user?.credits || 0}</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback>{user?.first_name?.[0]}{user?.last_name?.[0]}</AvatarFallback>
+                </Avatar>
+                <div className="hidden md:block">
+                  <p className="text-sm">{user?.first_name} {user?.last_name}</p>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="secondary" className="text-xs">
+                      {user?.role}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      Level {user?.level}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { }}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onLogout}>
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
 
 function AppRoutes() {
-  const navigate = useNavigate();
+  type AuthView = 'login' | 'signup' | 'dashboard' | 'loading';
   const [currentView, setCurrentView] = useState<AuthView>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string>('');
   const [routerKey, setRouterKey] = useState(0);
-
-  // Always check for existing session on mount
-  useEffect(() => {
-    const checkExistingSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        setAccessToken(session.access_token);
-        await fetchUserProfile(session.access_token);
-      }
-    };
-    checkExistingSession();
-  }, []);
-
-  const checkSession = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        setAccessToken(session.access_token);
-        await fetchUserProfile(session.access_token);
-      } else {
-        setCurrentView('login');
-      }
-    } catch (error) {
-      console.error('Session check error:', error);
-      setCurrentView('login');
-    }
-  };
-
-  const checkServerHealth = async (accessToken: string) => {
-    if (!accessToken) return false;
-    try {
-      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-0e871cde/health`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Server health check passed:', data);
-        return true;
-      } else {
-        console.log('Server health check failed:', response.status);
-        return false;
-      }
-    } catch (error) {
-      console.log('Server health check error:', error);
-      return false;
-    }
-  };
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const navigate = useNavigate();
 
   const fetchUserProfile = async (accessToken: string) => {
-    console.log('Attempting to fetch user profile...');
-    const serverHealthy = await checkServerHealth(accessToken);
-    console.log('Server health status:', serverHealthy);
-    if (!serverHealthy) {
-      console.log('Server unhealthy, skipping to fallback profile');
-      toast.warning('Server temporarily unavailable, using offline mode...');
-      await createFallbackProfile(accessToken);
+    // Get the real user from Supabase Auth
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user) {
+      toast.error('Failed to fetch user profile.');
+      setUser(null);
+      setCurrentView('login');
       return;
     }
-    try {
-      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-0e871cde/profile`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
+    // Fetch additional profile info from your DB if needed
+    const { data: profileData } = await supabase
+      .from('student_information')
+      .select('*')
+      .eq('id', data.user.id)
+      .maybeSingle();
+    if (!profileData) {
+      toast.error('No profile found for this user. Please complete your profile setup.');
+      setUser({
+        id: data.user.id,
+        first_name: '',
+        last_name: '',
+        email: data.user.email || '',
+        credits: 0,
+        role: 'student',
+        experience: 0,
+        level: 1,
+        total_earnings: 0,
+        streak: 0,
+        sessions_completed: 0,
+        weak_subjects: [],
+        preferred_learning_style: ''
       });
-      console.log('Profile fetch response status:', response.status);
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Profile data received:', data);
-        const userProfile = {
-          id: data.user.id || '',
-          first_name: data.user.first_name || 'User',
-          last_name: data.user.last_name || '',
-          email: data.user.email || '',
-          credits: data.user.credits ?? 0,
-          role: data.user.role || 'student',
-          experience: data.user.experience ?? 0,
-          level: data.user.level ?? 1,
-          total_earnings: data.user.total_earnings ?? 0,
-          streak: data.user.streak ?? 0,
-          sessions_completed: data.user.sessions_completed ?? 0,
-          weak_subjects: data.user.weak_subjects ?? [],
-          preferred_learning_style: data.user.preferred_learning_style ?? ''
-        };
-        console.log('Profile loaded successfully:', userProfile);
-        setUser(userProfile);
-        setCurrentView('dashboard');
-        toast.success('Profile loaded successfully');
-      } else {
-        const errorData = await response.json();
-        console.error('Profile fetch error:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData
-        });
-        toast.warning('Server profile unavailable, using temporary profile...');
-        await createFallbackProfile(accessToken);
-      }
-    } catch (error) {
-      console.error('Profile fetch network error:', error);
-      toast.warning('Network error, creating temporary profile...');
-      await createFallbackProfile(accessToken);
+      setCurrentView('dashboard');
+      return;
     }
+    setUser({
+      id: data.user.id, // UUID from Supabase Auth
+      first_name: profileData.first_name || '',
+      last_name: profileData.last_name || '',
+      email: data.user.email || '',
+      credits: profileData.credits || 0,
+      role: profileData.role || 'student',
+      experience: profileData.experience || 0,
+      level: profileData.level || 1,
+      total_earnings: profileData.total_earnings || 0,
+      streak: profileData.streak || 0,
+      sessions_completed: profileData.sessions_completed || 0,
+      weak_subjects: profileData.weak_subjects || [],
+      preferred_learning_style: profileData.preferred_learning_style || ''
+    });
+    setCurrentView('dashboard');
   };
 
-  const createFallbackProfile = async (accessToken: string) => {
-    console.log('Creating fallback profile...');
-    try {
-      const { data: { user }, error } = await supabase.auth.getUser(accessToken);
-      if (error) {
-        console.error('Error getting user for fallback:', error);
-        throw error;
-      }
-      if (user) {
-        console.log('User data for fallback profile:', {
-          id: user.id,
-          email: user.email,
-          metadata: user.user_metadata
-        });
-        const fallbackProfile = {
-          id: user.id || '',
-          first_name: user.user_metadata?.first_name || 'User',
-          last_name: user.user_metadata?.last_name || '',
-          email: user.email || '',
-          credits: 100,
-          role: user.user_metadata?.role || 'student',
-          experience: 0,
-          level: 1,
-          total_earnings: 0,
-          streak: 0,
-          sessions_completed: 0,
-          weak_subjects: [],
-          preferred_learning_style: ''
-        };
-        console.log('Fallback profile created:', fallbackProfile);
-        setUser(fallbackProfile);
-        setCurrentView('dashboard');
-        toast.success('Welcome! Using temporary profile while server reconnects.');
-      } else {
-        console.error('No user data available for fallback');
-        toast.error('Authentication failed. Please try logging in again.');
-        await supabase.auth.signOut();
-        setCurrentView('login');
-      }
-    } catch (fallbackError) {
-      console.error('Fallback profile creation error:', fallbackError);
-      toast.error('Unable to access your account. Please try logging in again.');
-      try {
-        await supabase.auth.signOut();
-      } catch (signOutError) {
-        console.error('Error signing out:', signOutError);
-      }
-      setCurrentView('login');
-    }
-  };
-
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const handleLogin = async (email: string, password: string) => {
     setIsLoggingIn(true);
-    console.log('Login attempt:', { email, password });
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      console.log('Login response:', { data, error });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         toast.error(`Login failed: ${error.message}`);
         setIsLoggingIn(false);
@@ -219,19 +195,15 @@ function AppRoutes() {
       if (data.session?.access_token) {
         setAccessToken(data.session.access_token);
         await fetchUserProfile(data.session.access_token);
-        const { data: userData } = await supabase.auth.getUser(data.session.access_token);
-        if (userData?.user?.user_metadata?.role === 'tutor') {
-          await supabase.from('tutor_information').update({ is_verified: true }).eq('id', userData.user.id);
-        }
         toast.success('Welcome back! Successfully logged in.');
         setRouterKey(prev => prev + 1);
         setIsLoggingIn(false);
+        navigate('/dashboard');
       } else {
         toast.error('Login failed: No access token returned.');
         setIsLoggingIn(false);
       }
     } catch (error) {
-      console.error('Login error:', error);
       toast.error('An unexpected error occurred during login.');
       setIsLoggingIn(false);
     }
@@ -242,13 +214,12 @@ function AppRoutes() {
     lastName: string;
     email: string;
     password: string;
-    role: string;
     qualifications?: string[];
     subjects?: string[];
+    role: string;
   }) => {
     try {
       if (userData.role === 'student') {
-        // Student signup: create user in Auth, then insert into student_information
         const { data, error: authError } = await supabase.auth.signUp({
           email: userData.email,
           password: userData.password,
@@ -263,27 +234,20 @@ function AppRoutes() {
         });
         if (authError) {
           toast.error(`Signup failed: ${authError.message}`);
-          console.error('Signup error:', authError);
           return;
         }
         const userId = data?.user?.id;
         if (!userId) {
-          toast.error('No user id returned from Auth signup. Cannot insert into student_information.');
+          toast.error('No user id returned from Auth signup.');
           return;
         }
-        // Insert into student_information using Auth user id
-        const { error: insertError } = await supabase.from('student_information').insert([
-          { id: userId, first_name: userData.firstName, last_name: userData.lastName, email: userData.email, credits: 0, role: 'student', experience: 0, level: 1, total_earnings: 0, streak: 0, weak_subjects: [], preferred_learning_style: '' }
+        await supabase.from('student_information').insert([
+          { id: userId, first_name: userData.firstName, last_name: userData.lastName, email: userData.email, credits: 0, role: 'student', experience: 0, level: 1, total_earnings: 0, streak: 0, sessions_completed: 0, weak_subjects: [], preferred_learning_style: '' }
         ]);
-        if (insertError) {
-          toast.error(`Failed to insert into student_information: ${insertError.message}`);
-          return;
-        }
         toast.success('Student account created! Please sign in.');
         setCurrentView('login');
         navigate('/login');
       } else if (userData.role === 'tutor') {
-        // Tutor signup: create user in Auth, then insert into tutor_information
         const { data, error: authError } = await supabase.auth.signUp({
           email: userData.email,
           password: userData.password,
@@ -307,14 +271,12 @@ function AppRoutes() {
           toast.error('No user id returned from Auth signup.');
           return;
         }
-        // Insert into tutor_information table
-        const { error: insertError } = await supabase.from('tutor_information').insert([
+        await supabase.from('tutor_information').insert([
           {
             id: tutorId,
             first_name: userData.firstName,
             last_name: userData.lastName,
             email: userData.email,
-            password: userData.password,
             role: 'tutor',
             rating: 0.0,
             total_sessions: 0,
@@ -326,16 +288,11 @@ function AppRoutes() {
             is_verified: true
           }
         ]);
-        if (insertError) {
-          toast.error(`Failed to insert into tutor_information: ${insertError.message}`);
-          return;
-        }
         toast.success('Tutor account created! Please sign in.');
         setCurrentView('login');
         navigate('/login');
       }
     } catch (error) {
-      console.error('Signup error:', error);
       toast.error('An unexpected error occurred during signup.');
     }
   };
@@ -349,7 +306,6 @@ function AppRoutes() {
       toast.success('Logged out successfully.');
       navigate('/login');
     } catch (error) {
-      console.error('Logout error:', error);
       toast.error('Error logging out.');
     }
   };
@@ -371,36 +327,77 @@ function AppRoutes() {
           <span className="text-lg text-gray-600">Logging in...</span>
         </div>
       ) : (
-        <Routes>
-          <Route path="/login" element={
-            accessToken
-              ? <Navigate to="/dashboard" />
-              : <LoginForm onLogin={handleLogin} onSwitchToSignup={switchToSignup} />
-          } />
-          <Route path="/signup" element={
-            accessToken
-              ? <Navigate to="/dashboard" />
-              : <SignupForm onSignup={handleSignup} onSwitchToLogin={switchToLogin} />
-          } />
-          <Route path="/dashboard" element={accessToken ? <Dashboard onLogout={handleLogout} accessToken={accessToken} /> : <Navigate to="/login" />} />
-          <Route path="/meeting/:sessionId" element={<Meeting user={user || {
-            id: '',
-            first_name: '',
-            last_name: '',
-            email: '',
-            credits: 0,
-            role: '',
-            experience: 0,
-            level: 0,
-            total_earnings: 0,
-            streak: 0,
-            sessions_completed: 0,
-            weak_subjects: [],
-            preferred_learning_style: ''
-          }} />} />
-          <Route path="/tutor-sessions" element={<TutorSessions user={user!} accessToken={accessToken} />} />
-          <Route path="/*" element={<Navigate to={accessToken ? '/dashboard' : '/login'} />} />
-        </Routes>
+        <TodosProvider userId={user?.id ?? ''}>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={
+              accessToken
+                ? <Navigate to="/dashboard" />
+                : <LoginForm onLogin={handleLogin} onSwitchToSignup={switchToSignup} />
+            } />
+            <Route path="/signup" element={
+              accessToken
+                ? <Navigate to="/dashboard" />
+                : <SignupForm onSignup={handleSignup} onSwitchToLogin={switchToLogin} />
+            } />
+
+            {/* Protected routes with persistent header/banner */}
+            {accessToken && user ? (
+              <Route element={<Layout user={user} onLogout={handleLogout} accessToken={accessToken} />}>
+                <Route path="/dashboard" element={<Dashboard onLogout={handleLogout} accessToken={accessToken} />} />
+                <Route path="/ai-tutor-assistant" element={<AITutor user={user!} accessToken={accessToken} onCreditsUpdate={() => { }} />} />
+                <Route path="/personalized-test" element={<PersonalizedTest user={user!} accessToken={accessToken} />} />
+                <Route path="/leaderboard" element={<Leaderboard user={user!} accessToken={accessToken} />} />
+                <Route path="/todo-list" element={<TodoList user={user!} />} />
+                <Route path="/past-papers" element={<PastYearPapers user={user!} accessToken={accessToken} />} />
+                <Route path="/calendar-timetable" element={<CalendarTimetable user={user!} />} />
+                <Route path="/peer-learning-groups" element={<PeerLearning user={user!} accessToken={accessToken} />} />
+                <Route path="/credits" element={<CreditsManager user={user!} accessToken={accessToken} onCreditsUpdate={() => { }} />} />
+                <Route path="/meeting/:sessionId" element={<Meeting user={user || {
+                  id: '',
+                  first_name: '',
+                  last_name: '',
+                  email: '',
+                  credits: 0,
+                  role: '',
+                  experience: 0,
+                  level: 0,
+                  total_earnings: 0,
+                  streak: 0,
+                  sessions_completed: 0,
+                  weak_subjects: [],
+                  preferred_learning_style: ''
+                }} />} />
+                <Route path="/tutor-sessions" element={<TutorSessions user={user!} accessToken={accessToken} />} />
+              </Route>
+            ) : (
+              <Route element={<Navigate to="/login" />} />
+            )}
+            <Route
+              path="/profile-settings"
+              element={
+                accessToken && user ? (
+                  <ProfileSettings
+                    user={{
+                      id: user.id,
+                      email: user.email,
+                      firstName: user.first_name,
+                      lastName: user.last_name,
+                      role: user.role,
+                      level: user.level,
+                      streak: user.streak,
+                      preferredLearningStyle: user.preferred_learning_style,
+                    }}
+                  />
+                ) : (
+                  <Navigate to="/login" />
+                )
+              }
+            />
+            {/* Catch-all route */}
+            <Route path="/*" element={<Navigate to={accessToken ? '/dashboard' : '/login'} />} />
+          </Routes>
+        </TodosProvider>
       )}
     </>
   );
