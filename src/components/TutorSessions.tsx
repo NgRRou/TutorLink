@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useState as useReactState } from 'react';
 import { Button } from "./ui/button";
@@ -508,6 +507,18 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
     const params = new URLSearchParams(window.location.search);
     params.delete("thankyou");
     window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`);
+  };
+
+  // Award 20 exp per completed session
+  const awardSessionExperience = async (studentId: string, currentExp: number) => {
+    const expEarned = 20;
+    const { error } = await supabase
+      .from('student_information')
+      .update({ experience: currentExp + expEarned })
+      .eq('id', studentId);
+    if (!error) {
+      toast.success(`You earned ${expEarned} experience for completing a session!`);
+    }
   };
 
   return (

@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { toast } from "sonner";
 import {
@@ -41,7 +40,7 @@ interface LeaderboardProps {
 interface LeaderboardEntry {
   id: string;
   user_id: string;
-  score: number;
+  experience: number;
   rank: number;
   first_name: string;
   last_name: string;
@@ -54,29 +53,31 @@ interface LeaderboardEntry {
 }
 
 export function Leaderboard({ user, accessToken }: LeaderboardProps) {
-  const [activeTab, setActiveTab] = useState('weekly');
+  const [activeTab, setActiveTab] = useState('monthly');
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [userRank, setUserRank] = useState<number>(0);
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userExperience, setUserExperience] = useState<number>(0);
   const [rewards, setRewards] = useState<any[]>([]);
 
-  // Fetch leaderboard from Supabase
+  // Fetch leaderboard and user info from Supabase
   useEffect(() => {
-    async function fetchLeaderboard() {
-      // Join leaderboard with student_information for names, etc.
-      const { data, error } = await supabase
+    async function fetchLeaderboardAndUser() {
+      // Fetch leaderboard (monthly) with explicit join key
+      const { data: leaderboardRows, error: leaderboardError } = await supabase
         .from('leaderboard')
-        .select(`id, user_id, score, rank, student:student_information (first_name, last_name, level, streak, sessions_completed, total_earnings, credits)`)
-        .order('rank', { ascending: true })
+        .select(`id, student_id, experience, rank, student:student_information!leaderboard_student_id_fkey (first_name, last_name, level, streak, sessions_completed, credits)`)
+        .order('experience', { ascending: false })
         .limit(10);
-      if (error) {
+      if (leaderboardError) {
         toast.error('Failed to load leaderboard');
         return;
       }
-      if (data) {
-        const entries: LeaderboardEntry[] = data.map((entry: any) => ({
+      if (leaderboardRows) {
+        const entries: LeaderboardEntry[] = leaderboardRows.map((entry: any) => ({
           id: entry.id,
-          user_id: entry.user_id,
-          score: entry.score,
+          user_id: entry.student_id, // changed from user_id to student_id
+          experience: entry.experience,
           rank: entry.rank,
           first_name: entry.student?.first_name || '',
           last_name: entry.student?.last_name || '',
@@ -91,9 +92,18 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
         const userEntry = entries.find(e => e.user_id === user.id);
         setUserRank(userEntry ? userEntry.rank : 0);
       }
+      // Fetch user credits and experience from student_information
+      const { data: student, error: studentError } = await supabase
+        .from('student_information')
+        .select('credits, experience')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!studentError && student) {
+        setUserCredits(student.credits);
+        setUserExperience(student.experience);
+      }
     }
-    fetchLeaderboard();
-    // Mock rewards (unchanged)
+    fetchLeaderboardAndUser();
     setRewards([
       { rank: 1, credits: 100, badge: 'Gold Crown', icon: Crown },
       { rank: 2, credits: 75, badge: 'Silver Medal', icon: Medal },
@@ -132,12 +142,29 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
     return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
   };
 
-  const claimReward = (rank: number) => {
-    toast.success(`Congratulations! You've claimed your Top ${rank} reward!`);
+  // Remove tabs, only show monthly leaderboard
+  const claimReward = async (rank: number) => {
+    // Find reward for this rank
+    let reward = rewards.find(r => (typeof r.rank === 'number' && r.rank === rank) || (typeof r.rank === 'string' && r.rank === '4-10' && rank >= 4 && rank <= 10));
+    if (!reward) {
+      toast.error('No reward for this rank.');
+      return;
+    }
+    // Add credits to student_information
+    const { error } = await supabase
+      .from('student_information')
+      .update({ credits: userCredits + reward.credits })
+      .eq('id', user.id);
+    if (error) {
+      toast.error('Failed to claim reward.');
+      return;
+    }
+    setUserCredits(userCredits + reward.credits);
+    toast.success(`Congratulations! You've claimed your Top ${rank} reward and earned ${reward.credits} credits!`);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-3xl mx-auto">
       {/* Header */}
       <Card>
         <CardHeader>
@@ -163,16 +190,16 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
               <div className="flex items-center justify-center w-12 h-12 bg-green-100 rounded-full mx-auto mb-2">
                 <TrendingUp className="h-6 w-6 text-green-600" />
               </div>
-              <p className="text-2xl font-bold text-green-700">{user.experience}</p>
-              <p className="text-sm text-green-600">Total Points</p>
+              <p className="text-2xl font-bold text-green-700">{userExperience}</p>
+              <p className="text-sm text-green-600">Total Experience</p>
             </div>
 
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <div className="flex items-center justify-center w-12 h-12 bg-purple-100 rounded-full mx-auto mb-2">
                 <Award className="h-6 w-6 text-purple-600" />
               </div>
-              <p className="text-2xl font-bold text-purple-700">Level {user.level}</p>
-              <p className="text-sm text-purple-600">Current Level</p>
+              <p className="text-2xl font-bold text-purple-700">{userCredits}</p>
+              <p className="text-sm text-purple-600">Credits Earned</p>
             </div>
           </div>
         </CardContent>
@@ -219,178 +246,60 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
           <CardDescription>See how you stack up against other learners</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="weekly">Weekly</TabsTrigger>
-              <TabsTrigger value="monthly">Monthly</TabsTrigger>
-              <TabsTrigger value="alltime">All Time</TabsTrigger>
-            </TabsList>
+          {/* Only show monthly leaderboard */}
+          <div className="space-y-4 mt-6">
+            {leaderboardData.map((entry, index) => (
+              <div
+                key={entry.id}
+                className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''}`}
+              >
+                {/* Rank */}
+                <div className="flex-shrink-0 w-12 text-center">
+                  {getRankIcon(entry.rank)}
+                </div>
 
-            <TabsContent value="weekly" className="space-y-4 mt-6">
-              {leaderboardData.map((entry, index) => (
-                <div
-                  key={entry.id}
-                  className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''
-                    }`}
-                >
-                  {/* Rank */}
-                  <div className="flex-shrink-0 w-12 text-center">
-                    {getRankIcon(entry.rank)}
+                {/* Avatar */}
+                <Avatar className="h-10 w-10">
+                  <AvatarFallback className={entry.rank <= 3 ? getRankColor(entry.rank) : 'bg-gray-100'}>
+                    <span className={entry.rank <= 3 ? 'text-white' : 'text-gray-700'}>
+                      {getInitials(entry.first_name, entry.last_name)}
+                    </span>
+                  </AvatarFallback>
+                </Avatar>
+
+                {/* User Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2">
+                    <p className="font-medium">{entry.first_name} {entry.last_name}</p>
+                    {entry.badge && (
+                      <Badge variant="secondary" className="text-xs">
+                        {entry.badge}
+                      </Badge>
+                    )}
                   </div>
-
-                  {/* Avatar */}
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className={entry.rank <= 3 ? getRankColor(entry.rank) : 'bg-gray-100'}>
-                      <span className={entry.rank <= 3 ? 'text-white' : 'text-gray-700'}>
-                        {getInitials(entry.first_name, entry.last_name)}
-                      </span>
-                    </AvatarFallback>
-                  </Avatar>
-
-                  {/* User Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium">{entry.first_name} {entry.last_name}</p>
-                      {entry.badge && (
-                        <Badge variant="secondary" className="text-xs">
-                          {entry.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">
-                      <span>Level {entry.level}</span>
-                      <span>•</span>
-                      <span>{entry.streak} day streak</span>
-                      <span>•</span>
-                      <span>{entry.sessions_completed} sessions</span>
-                    </div>
-                  </div>
-
-                  {/* Points */}
-                  <div className="text-right">
-                    <p className="font-bold text-lg">{entry.score.toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">points</p>
-                  </div>
-
-                  {/* Credits Earned */}
-                  <div className="flex items-center space-x-1 text-sm">
-                    <Coins className="h-4 w-4 text-yellow-500" />
-                    <span>{entry.credits_earned}</span>
+                  <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">
+                    <span>Level {entry.level}</span>
+                    <span>•</span>
+                    <span>{entry.streak} day streak</span>
+                    <span>•</span>
+                    <span>{entry.sessions_completed} sessions</span>
                   </div>
                 </div>
-              ))}
-            </TabsContent>
 
-            <TabsContent value="monthly" className="space-y-4 mt-6">
-              {leaderboardData.map((entry, index) => (
-                <div
-                  key={entry.id}
-                  className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''
-                    }`}
-                >
-                  {/* Rank */}
-                  <div className="flex-shrink-0 w-12 text-center">
-                    {getRankIcon(entry.rank)}
-                  </div>
-
-                  {/* Avatar */}
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className={entry.rank <= 3 ? getRankColor(entry.rank) : 'bg-gray-100'}>
-                      <span className={entry.rank <= 3 ? 'text-white' : 'text-gray-700'}>
-                        {getInitials(entry.first_name, entry.last_name)}
-                      </span>
-                    </AvatarFallback>
-                  </Avatar>
-
-                  {/* User Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium">{entry.first_name} {entry.last_name}</p>
-                      {entry.badge && (
-                        <Badge variant="secondary" className="text-xs">
-                          {entry.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">
-                      <span>Level {entry.level}</span>
-                      <span>•</span>
-                      <span>{entry.streak} day streak</span>
-                      <span>•</span>
-                      <span>{entry.sessions_completed} sessions</span>
-                    </div>
-                  </div>
-
-                  {/* Points */}
-                  <div className="text-right">
-                    <p className="font-bold text-lg">{entry.score.toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">points</p>
-                  </div>
-
-                  {/* Credits Earned */}
-                  <div className="flex items-center space-x-1 text-sm">
-                    <Coins className="h-4 w-4 text-yellow-500" />
-                    <span>{entry.credits_earned}</span>
-                  </div>
+                {/* Points */}
+                <div className="text-right">
+                  <p className="font-bold text-lg">{entry.experience.toLocaleString()}</p>
+                  <p className="text-sm text-muted-foreground">points</p>
                 </div>
-              ))}
-            </TabsContent>
 
-            <TabsContent value="alltime" className="space-y-4 mt-6">
-              {leaderboardData.map((entry, index) => (
-                <div
-                  key={entry.id}
-                  className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''
-                    }`}
-                >
-                  {/* Rank */}
-                  <div className="flex-shrink-0 w-12 text-center">
-                    {getRankIcon(entry.rank)}
-                  </div>
-
-                  {/* Avatar */}
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className={entry.rank <= 3 ? getRankColor(entry.rank) : 'bg-gray-100'}>
-                      <span className={entry.rank <= 3 ? 'text-white' : 'text-gray-700'}>
-                        {getInitials(entry.first_name, entry.last_name)}
-                      </span>
-                    </AvatarFallback>
-                  </Avatar>
-
-                  {/* User Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium">{entry.first_name} {entry.last_name}</p>
-                      {entry.badge && (
-                        <Badge variant="secondary" className="text-xs">
-                          {entry.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">
-                      <span>Level {entry.level}</span>
-                      <span>•</span>
-                      <span>{entry.streak} day streak</span>
-                      <span>•</span>
-                      <span>{entry.sessions_completed} sessions</span>
-                    </div>
-                  </div>
-
-                  {/* Points */}
-                  <div className="text-right">
-                    <p className="font-bold text-lg">{entry.score.toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">points</p>
-                  </div>
-
-                  {/* Credits Earned */}
-                  <div className="flex items-center space-x-1 text-sm">
-                    <Coins className="h-4 w-4 text-yellow-500" />
-                    <span>{entry.credits_earned}</span>
-                  </div>
+                {/* Credits Earned */}
+                <div className="flex items-center space-x-1 text-sm">
+                  <Coins className="h-4 w-4 text-yellow-500" />
+                  <span>{entry.credits_earned}</span>
                 </div>
-              ))}
-            </TabsContent>
-          </Tabs>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
 

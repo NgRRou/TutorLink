@@ -18,6 +18,7 @@ import {
   Trophy
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
+import { supabase } from '../utils/supabase/client';
 
 interface User {
   id: string;
@@ -46,6 +47,12 @@ interface CreditsManagerProps {
 export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNavigate }: CreditsManagerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [dailyLoginClaimed, setDailyLoginClaimed] = useState(false);
+  const [localCredits, setLocalCredits] = useState(user.credits);
+
+  // Keep localCredits in sync if user.credits changes from parent
+  React.useEffect(() => {
+    setLocalCredits(user.credits);
+  }, [user.credits]);
 
   const creditPackages = [
     {
@@ -116,19 +123,42 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
     }
   ];
 
-  // Mock purchase function with success simulation
+  // Purchase function: update credits in both local state and Supabase
   const purchaseCredits = async (packageId: string) => {
     const packageData = creditPackages.find(pkg => pkg.id === packageId);
     if (!packageData) return;
 
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      onCreditsUpdate(user.credits + packageData.credits);
-      toast.success('Purchase successful! Credits have been added to your account.');
+    // Instantly update local credits for immediate UI feedback
+    const newCredits = localCredits + packageData.credits;
+    setLocalCredits(newCredits);
+    onCreditsUpdate(newCredits); // update parent immediately
+
+    // Update credits in Supabase student_information table
+    const { error } = await supabase
+      .from('student_information')
+      .update({ credits: newCredits })
+      .eq('id', user.id);
+
+    if (error) {
+      toast.error('Failed to update credits in your account.');
       setIsLoading(false);
-    }, 1500);
+      return;
+    }
+
+    // Fetch the latest credits from Supabase to ensure UI is in sync
+    const { data, error: fetchError } = await supabase
+      .from('student_information')
+      .select('credits')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (!fetchError && data && typeof data.credits === 'number') {
+      setLocalCredits(data.credits);
+      onCreditsUpdate(data.credits);
+    }
+    toast.success('Purchase successful! Credits have been added to your account.');
+    setIsLoading(false);
   };
 
   const claimDailyLogin = () => {
@@ -172,7 +202,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               <div className="flex items-center justify-center w-12 h-12 bg-yellow-100 rounded-full mx-auto mb-2">
                 <Coins className="h-6 w-6 text-yellow-600" />
               </div>
-              <p className="text-2xl font-bold text-yellow-700">{user.credits}</p>
+              <p className="text-2xl font-bold text-yellow-700">{localCredits}</p>
               <p className="text-sm text-yellow-600">Available Credits</p>
             </div>
 

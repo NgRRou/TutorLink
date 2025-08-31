@@ -44,7 +44,8 @@ interface User {
   preferred_learning_style: string;
 }
 
-function Layout({ user, onLogout, accessToken }: { user: User, onLogout: () => void, accessToken: string }) {
+
+function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, onLogout: () => void, accessToken: string, onCreditsUpdate: (credits: number) => void }) {
   const location = useLocation();
   const pathToFeatureId: Record<string, string> = {
     '/dashboard': 'overview',
@@ -115,7 +116,7 @@ function Layout({ user, onLogout, accessToken }: { user: User, onLogout: () => v
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Outlet />
+        <Outlet context={{ onCreditsUpdate }} />
       </main>
     </div>
   );
@@ -125,6 +126,10 @@ function AppRoutes() {
   type AuthView = 'login' | 'signup' | 'dashboard' | 'loading';
   const [currentView, setCurrentView] = useState<AuthView>('loading');
   const [user, setUser] = useState<User | null>(null);
+  // This function will be passed to all children and header for instant credit updates
+  const handleCreditsUpdate = (newCredits: number) => {
+    setUser(prev => prev ? { ...prev, credits: newCredits } : prev);
+  };
   const [accessToken, setAccessToken] = useState<string>('');
   const [routerKey, setRouterKey] = useState(0);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -343,16 +348,16 @@ function AppRoutes() {
 
             {/* Protected routes with persistent header/banner */}
             {accessToken && user ? (
-              <Route element={<Layout user={user} onLogout={handleLogout} accessToken={accessToken} />}>
+              <Route element={<Layout user={user} onLogout={handleLogout} accessToken={accessToken} onCreditsUpdate={handleCreditsUpdate} />}>
                 <Route path="/dashboard" element={<Dashboard onLogout={handleLogout} accessToken={accessToken} />} />
-                <Route path="/ai-tutor-assistant" element={<AITutor user={user!} accessToken={accessToken} onCreditsUpdate={() => { }} />} />
+                <Route path="/ai-tutor-assistant" element={<AITutor user={user!} accessToken={accessToken} onCreditsUpdate={handleCreditsUpdate} />} />
                 <Route path="/personalized-test" element={<PersonalizedTest user={user!} accessToken={accessToken} />} />
                 <Route path="/leaderboard" element={<Leaderboard user={user!} accessToken={accessToken} />} />
                 <Route path="/todo-list" element={<TodoList user={user!} />} />
                 <Route path="/past-papers" element={<PastYearPapers user={user!} accessToken={accessToken} />} />
                 <Route path="/calendar-timetable" element={<CalendarTimetable user={user!} />} />
                 <Route path="/peer-learning-groups" element={<PeerLearning user={user!} accessToken={accessToken} />} />
-                <Route path="/credits" element={<CreditsManager user={user!} accessToken={accessToken} onCreditsUpdate={() => { }} />} />
+                <Route path="/credits" element={<CreditsManager user={user!} accessToken={accessToken} onCreditsUpdate={handleCreditsUpdate} />} />
                 <Route path="/meeting/:sessionId" element={<Meeting user={user || {
                   id: '',
                   first_name: '',

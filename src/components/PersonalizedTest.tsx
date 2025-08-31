@@ -28,6 +28,7 @@ import {
   Star
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
+import { supabase } from '../utils/supabase/client';
 
 interface User {
   id: string;
@@ -309,12 +310,11 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     }
   };
 
-  const completeTest = () => {
+  const completeTest = async () => {
     const results: TestResult[] = questions.map(question => {
       const userAnswer = answers[question.id] || '';
       const isCorrect = userAnswer === question.correctAnswer;
       const pointsEarned = isCorrect ? question.points : 0;
-
       return {
         questionId: question.id,
         userAnswer,
@@ -329,6 +329,39 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
 
     // Update learning progress based on results
     updateLearningProgress(results);
+
+    // Award experience and credits to student
+    const totalExp = results.reduce((sum, r) => sum + r.pointsEarned, 0);
+    const creditsEarned = results.filter(r => r.isCorrect).length;
+    if (user?.id) {
+      // Fetch current experience and credits from Supabase
+      const { data: student, error: fetchError } = await supabase
+        .from('student_information')
+        .select('experience, credits')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!fetchError && student) {
+        // Update student_information
+        const { error } = await supabase
+          .from('student_information')
+          .update({
+            experience: (student.experience || 0) + totalExp,
+            credits: (student.credits || 0) + creditsEarned
+          })
+          .eq('id', user.id);
+        // Update leaderboard experience (and optionally rank)
+        await supabase
+          .from('leaderboard')
+          .update({
+            experience: (student.experience || 0) + totalExp
+            // Optionally, update rank here if you have logic for it
+          })
+          .eq('student_id', user.id);
+        if (!error) {
+          toast.success(`You earned ${totalExp} experience and ${creditsEarned} credits!`);
+        }
+      }
+    }
 
     toast.success('Test completed!');
   };
@@ -664,7 +697,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
         </Card>
 
         {/* Score Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-6 text-center">
               <div className="text-3xl font-bold text-blue-600 mb-1">{score.percentage}%</div>
@@ -694,6 +727,17 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="p-6 text-center">
+              <div className="text-3xl font-bold text-yellow-600 mb-1">
+                {testResults.filter(r => r.isCorrect).length}
+              </div>
+              <div className="text-sm text-muted-foreground">Experience & Credits Earned</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {testResults.filter(r => r.isCorrect).length} experience, {testResults.filter(r => r.isCorrect).length} credits
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Detailed Results */}
@@ -705,6 +749,8 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
             <div className="space-y-4">
               {questions.map((question, index) => {
                 const result = testResults[index];
+                // Defensive: skip if question or result is undefined
+                if (!question || !result) return null;
                 return (
                   <div key={question.id} className="p-4 border rounded-lg">
                     <div className="flex items-start justify-between mb-2">
@@ -714,8 +760,8 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
                           <Badge variant="outline" className="text-xs">{question.topic}</Badge>
                           <Badge
                             className={`text-xs ${question.difficulty === 'hard' ? 'bg-red-100 text-red-700' :
-                                question.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                  'bg-green-100 text-green-700'
+                              question.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-green-100 text-green-700'
                               }`}
                           >
                             {question.difficulty}
@@ -800,7 +846,8 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
                   <h4 className="font-medium text-green-800 mb-2">Strengths Identified:</h4>
                   <ul className="text-sm text-green-700 space-y-1">
                     {questions
-                      .filter((q, i) => testResults[i]?.isCorrect)
+                      .map((q, i) => (testResults[i]?.isCorrect ? q : null))
+                      .filter((q): q is Question => !!q)
                       .map(q => q.topic)
                       .filter((topic, index, arr) => arr.indexOf(topic) === index)
                       .slice(0, 3)

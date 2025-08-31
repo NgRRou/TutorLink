@@ -81,13 +81,6 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ user, currentFeature 
                 </div>
             </header>
             <div className="max-w-7xl mx-auto">
-                {/* Navigation */}
-                <FeatureNavigation
-                    userCredits={user.level * 10}
-                    userRole={user.role}
-                    currentFeature={currentFeature}
-                    onFeatureSelect={onFeatureSelect}
-                />
                 <div className="space-y-6 mt-8">
                     {/* Profile Header */}
                     <Card>

@@ -18,6 +18,7 @@ interface User {
   weak_subjects: string[];
   preferred_learning_style: string;
   last_active?: string;
+  favorite_tutors?: string[];
 }
 
 interface Progress {
@@ -82,6 +83,7 @@ import {
   User
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
+import { supabase } from '../utils/supabase/client';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -90,6 +92,42 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) => {
   const [user, setUser] = useState<User | null>(null);
+  // Auto-level up: when experience reaches 300, increment level and update DB
+  useEffect(() => {
+    if (!user) return;
+    if (user.experience >= 300) {
+      const newLevel = (user.level || 1) + 1;
+      const newExp = user.experience - 300;
+      // Update in Supabase
+      supabase
+        .from('student_information')
+        .update({ level: newLevel, experience: newExp })
+        .eq('id', user.id)
+        .then(({ error }) => {
+          if (!error) {
+            setUser(prev => prev ? { ...prev, level: newLevel, experience: newExp } : prev);
+          }
+        });
+    }
+  }, [user?.experience]);
+  // Auto-level up: when experience reaches 300, increment level and update DB
+  useEffect(() => {
+    if (!user) return;
+    if (user.experience >= 300) {
+      const newLevel = (user.level || 1) + 1;
+      const newExp = user.experience - 300;
+      // Update in Supabase
+      supabase
+        .from('student_information')
+        .update({ level: newLevel, experience: newExp })
+        .eq('id', user.id)
+        .then(({ error }) => {
+          if (!error) {
+            setUser(prev => prev ? { ...prev, level: newLevel, experience: newExp } : prev);
+          }
+        });
+    }
+  }, [user?.experience]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null);
   const [currentFeature, setCurrentFeature] = useState('overview');
@@ -127,45 +165,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
   // Fetch user profile and progress from Supabase KV store
   useEffect(() => {
-    const fetchProfileAndProgress = async () => {
+    const fetchUserFromStudentInfo = async () => {
       if (!accessToken) return;
       try {
-        const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-0e871cde/profile`, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user) {
-            setUser({
-              id: data.user.id,
-              first_name: data.user.first_name,
-              last_name: data.user.last_name,
-              email: data.user.email,
-              role: data.user.role,
-              credits: data.user.credits,
-              experience: data.user.experience,
-              level: data.user.level,
-              total_earnings: data.user.total_earnings,
-              sessions_completed: data.user.sessions_completed,
-              streak: data.user.streak,
-              weak_subjects: data.user.weak_subjects,
-              preferred_learning_style: data.user.preferred_learning_style,
-              last_active: data.user.last_active,
-            });
-            if (data.user.progress) {
-              setProgress(data.user.progress);
-            }
-          }
+        // Get user id from accessToken (assume JWT, decode or use supabase.auth.getUser())
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !authUser) {
+          console.error('Failed to get authenticated user:', authError);
+          return;
+        }
+        const { data, error } = await supabase
+          .from('student_information')
+          .select('*')
+          .eq('id', authUser.id)
+          .maybeSingle();
+        if (!error && data) {
+          setUser({
+            id: data.id,
+            first_name: data.first_name,
+            last_name: data.last_name,
+            email: data.email,
+            role: data.role,
+            credits: data.credits,
+            experience: data.experience,
+            level: data.level,
+            total_earnings: data.total_earnings ?? 0,
+            sessions_completed: data.sessions_completed ?? 0,
+            streak: data.streak,
+            weak_subjects: data.weak_subjects ?? [],
+            preferred_learning_style: data.preferred_learning_style ?? '',
+            last_active: data.last_active,
+            favorite_tutors: data.favorite_tutors ?? [],
+          });
         }
       } catch (err) {
-        console.error('Failed to fetch profile/progress:', err);
+        console.error('Failed to fetch user from student_information:', err);
       }
     };
-    fetchProfileAndProgress();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchUserFromStudentInfo();
   }, [accessToken]);
 
   // Fetch daily quote when access token is available
@@ -213,8 +250,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
     }
   };
 
+  // Fetch latest credits from Supabase after update
   const handleCreditsUpdate = (newCredits: number) => {
+    if (!user) return;
+    // Instantly update UI for responsiveness
     setUser(prev => (prev ? { ...prev, credits: newCredits } : prev));
+    // Then fetch latest credits from Supabase to ensure accuracy
+    supabase
+      .from('student_information')
+      .select('credits')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data && typeof data.credits === 'number') {
+          setUser(prev => (prev ? { ...prev, credits: data.credits } : prev));
+        }
+      });
   };
 
   const handleTodoToggle = (todoId: string) => {
@@ -269,11 +320,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
     }
   ];
 
-  const getInitials = (firstName?: string, lastName?: string) => {
-    const first = (firstName && firstName.length > 0) ? firstName.charAt(0) : '';
-    const last = (lastName && lastName.length > 0) ? lastName.charAt(0) : '';
-    return `${first}${last}`.toUpperCase() || '?';
-  };
+  function getInitials(firstName: string, lastName: string) {
+    return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase();
+  }
 
   const getRoleDisplay = (role: string) => {
     return role.charAt(0).toUpperCase() + role.slice(1);
@@ -353,49 +402,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Credits */}
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
               <Coins className="h-8 w-8 text-yellow-600" />
               <div className="ml-4">
                 <p className="text-sm text-muted-foreground">Credits</p>
-                <p className="text-2xl font-bold">{user?.credits ?? '-'}</p>
+                <p className="text-2xl font-bold">{user ? user.credits : '-'}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* Experience */}
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <TrendingUp className="h-8 w-8 text-orange-500" />
+              <div className="ml-4">
+                <p className="text-sm text-muted-foreground">Experience</p>
+                <p className="text-2xl font-bold">{user ? user.experience : '-'}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Level */}
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
               <TrendingUp className="h-8 w-8 text-green-600" />
               <div className="ml-4">
                 <p className="text-sm text-muted-foreground">Level</p>
-                <p className="text-2xl font-bold">{user?.level ?? '-'}</p>
+                <p className="text-2xl font-bold">{user ? user.level : '-'}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Award className="h-8 w-8 text-purple-600" />
-              <div className="ml-4">
-                <p className="text-sm text-muted-foreground">Sessions</p>
-                <p className="text-2xl font-bold">{user?.sessions_completed ?? 0}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
+        {/* Streak */}
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center">
               <Target className="h-8 w-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm text-muted-foreground">Streak</p>
-                <p className="text-2xl font-bold">{user?.streak ?? '-'} days</p>
+                <p className="text-2xl font-bold">{user ? user.streak : '-'} days</p>
               </div>
             </div>
           </CardContent>
@@ -828,29 +881,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
   return (
     <div className="min-h-screen bg-gray-50">
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8 flex items-center space-x-4">
-          <Avatar className="h-12 w-12">
-            <AvatarFallback>{getInitials(user.first_name, user.last_name)}</AvatarFallback>
-          </Avatar>
-          <div>
-            <h2>Welcome back, {user.first_name}!</h2>
-            <p className="text-sm">{user.first_name} {user.last_name}</p>
-            <p className="text-muted-foreground">Ready to learn something new today?</p>
+      <div className="max-w-7xl mx-auto">
+        {/* Main Content */}
+        <main className="px-4 py-6">
+          {/* User Info Header */}
+          <div className="mb-8 flex items-center space-x-4">
+            <Avatar className="h-12 w-12">
+              <AvatarFallback>
+                {/* Robust initials fallback: use first_name/last_name, fallback to email chars, then 'U' */}
+                {getInitials(
+                  user.first_name && user.first_name.trim() ? user.first_name : (user.email ? user.email[0] : 'U'),
+                  user.last_name && user.last_name.trim() ? user.last_name : (user.email ? user.email[1] || user.email[0] : 'U')
+                )}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h2>
+                {(() => {
+                  const hasFirst = user.first_name && user.first_name.trim();
+                  const hasLast = user.last_name && user.last_name.trim();
+                  if (hasFirst && hasLast) {
+                    return `Welcome back, ${user.last_name} ${user.first_name}!`;
+                  } else if (hasFirst) {
+                    return `Welcome back, ${user.first_name}!`;
+                  } else if (hasLast) {
+                    return `Welcome back, ${user.last_name}!`;
+                  } else {
+                    return 'Welcome back, User!';
+                  }
+                })()}
+              </h2>
+              <p className="text-muted-foreground mt-1">Ready to learn something new today?</p>
+            </div>
           </div>
-        </div>
+          {renderFeatureContent()}
+        </main>
 
-        {renderFeatureContent()}
-      </main>
-
-      {/* Floating AI Tutor */}
-      <FloatingAITutor
-        user={user}
-        accessToken={accessToken}
-        onCreditsUpdate={handleCreditsUpdate}
-      />
+        {/* Floating AI Tutor */}
+        <FloatingAITutor
+          user={user}
+          accessToken={accessToken}
+          onCreditsUpdate={handleCreditsUpdate}
+        />
+      </div>
     </div>
   );
 };
