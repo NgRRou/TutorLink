@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { useState as useReactState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -29,8 +28,6 @@ import {
   Play
 } from "lucide-react";
 
-
-// Helper: Upload file to Supabase Storage and update tutor_information
 async function uploadVerificationDocument(file: File, tutorId: string, supabase: any) {
   const filePath = `${tutorId}/${Date.now()}_${file.name}`;
   const { error: uploadError } = await supabase.storage.from('tutor-docs').upload(filePath, file, { upsert: true });
@@ -50,6 +47,20 @@ async function uploadVerificationDocument(file: File, tutorId: string, supabase:
   return publicUrl;
 }
 
+async function fetchSessions(studentId: string) {
+  const { data, error } = await supabase
+    .from('tutor_sessions')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('date', { ascending: false })
+    .order('time', { ascending: false });
+
+  if (error) {
+    toast.error('Failed to fetch sessions: ' + error.message);
+    return [];
+  }
+  return data;
+}
 
 let demoTutorId: string | undefined;
 import { supabase as supabaseClient } from '../utils/supabase/client';
@@ -68,9 +79,9 @@ interface Tutor {
   }[];
   isFavorite: boolean;
   isOnline: boolean;
-  bio: string;
-  qualifications: string[];
-  verified_document?: string; // URL or path to verification document
+  qualifications: string;
+  verified_document?: string;
+  credits_earned?: number;
 }
 
 interface Session {
@@ -118,7 +129,7 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
   // Booking confirmation state
   const [showBookingConfirm, setShowBookingConfirm] = useState(false);
   const [lastBooked, setLastBooked] = useState<{ tutorId: string; day: string; time: string } | null>(null);
-
+  const openDialogButtonRef = useRef<HTMLButtonElement>(null);
   // Now tutors is defined, so demoTutorId can be set
   demoTutorId = tutors[0]?.id;
 
@@ -129,87 +140,139 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
 
   const difficulties = ['Beginner', 'Intermediate', 'Advanced', 'Expert'];
 
-  // All logic and state is now inside the TutorSessions function
-  // Return the main JSX
-  // ...existing code inside TutorSessions function...
-  // ...existing code...
-  // ...existing code...
+  const mockTimetable = [
+    { day: 'Monday', time: '09:00', subject: 'Chemistry Class' },
+    { day: 'Monday', time: '14:00', subject: 'Math Study Group' },
+    { day: 'Tuesday', time: '10:00', subject: 'Physics Lab' },
+    { day: 'Wednesday', time: '15:00', subject: 'English Literature' }
+  ];
 
-  // Detect thankyou query param and load last session
+  const formatTime = (time: string) => time.slice(0, 5); // "14:00:00" -> "14:00"
+
+  // useEffect(() => {
+  //   const fetchTutors = async () => {
+  //     const { data, error } = await supabase.from('tutor_information').select('*');
+  //     if (error || !data || data.length === 0) {
+  //       // Fallback to mock tutors if fetch fails
+  //       const mockTutors: Tutor[] = [
+  //         {
+  //           id: 'b1a7e2c0-1f2b-4e3a-9c1d-1234567890ab',
+  //           name: 'Sarah Johnson',
+  //           rating: 4.9,
+  //           totalSessions: 247,
+  //           subjects: ['Mathematics', 'Physics'],
+  //           hourlyRate: 15,
+  //           availability: [
+  //             { day: 'Monday', times: ['09:00', '10:00', '14:00', '15:00'] },
+  //             { day: 'Tuesday', times: ['09:00', '11:00', '16:00'] },
+  //             { day: 'Wednesday', times: ['10:00', '14:00', '15:00', '16:00'] }
+  //           ],
+  //           isFavorite: true,
+  //           isOnline: true,
+  //           bio: 'Experienced Mathematics tutor with 5+ years of teaching experience.',
+  //           qualifications: ['M.Sc Mathematics', 'Teaching Certificate', 'PhD candidate'],
+  //           verified_document: ''
+  //         },
+  //         {
+  //           id: 'c2b8f3d1-2e3c-5f4b-8d2e-2345678901bc',
+  //           name: 'Dr. Michael Brown',
+  //           rating: 4.8,
+  //           totalSessions: 189,
+  //           subjects: ['Physics', 'Chemistry'],
+  //           hourlyRate: 20,
+  //           availability: [
+  //             { day: 'Monday', times: ['11:00', '15:00', '16:00'] },
+  //             { day: 'Thursday', times: ['09:00', '10:00', '14:00'] },
+  //             { day: 'Friday', times: ['13:00', '14:00', '15:00'] }
+  //           ],
+  //           isFavorite: false,
+  //           isOnline: true,
+  //           bio: 'PhD in Physics with specialization in quantum mechanics and thermodynamics.',
+  //           qualifications: ['PhD Physics', '10+ years experience', 'Research publications'],
+  //           verified_document: ''
+  //         },
+  //         {
+  //           id: 'd3c9a4e2-3f4d-6a5c-9e3f-3456789012cd',
+  //           name: 'Emma Davis',
+  //           rating: 4.7,
+  //           totalSessions: 156,
+  //           subjects: ['English', 'History'],
+  //           hourlyRate: 12,
+  //           availability: [
+  //             { day: 'Tuesday', times: ['10:00', '11:00', '15:00'] },
+  //             { day: 'Wednesday', times: ['09:00', '13:00', '16:00'] },
+  //             { day: 'Saturday', times: ['10:00', '11:00', '14:00'] }
+  //           ],
+  //           isFavorite: true,
+  //           isOnline: false,
+  //           bio: 'Literature enthusiast with expertise in creative writing and essay composition.',
+  //           qualifications: ['B.A English Literature', 'TEFL Certified', '3 years experience'],
+  //           verified_document: ''
+  //         }
+  //       ];
+  //       setTutors(mockTutors);
+  //     } else {
+  //       // Map Supabase data to match Tutor interface
+  //       const mappedTutors = data.map(t => ({
+  //         id: t.id,
+  //         name: t.name || `${t.first_name} ${t.last_name}`,
+  //         rating: t.rating || 4.0,
+  //         totalSessions: t.total_sessions || 0,
+  //         subjects: t.subjects || ['General'],
+  //         hourlyRate: t.hourly_rate || 10,
+  //         availability: t.availability || [],
+  //         isFavorite: t.is_favorite || false,
+  //         isOnline: t.is_online || false,
+  //         bio: t.bio || '',
+  //         qualifications: t.qualifications || [],
+  //         verified_document: t.verified_document || ''
+  //       }));
+  //       setTutors(mappedTutors);
+  //     }
+  //   };
+  //   fetchTutors();
+
+  //   setStudentTimetable(mockTimetable);
+  // }, []);
+
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("thankyou") === "1") {
-      setShowThankYou(true);
-      // Find the most recent completed or ongoing session
-      const savedSessions = localStorage.getItem('tutorSessions');
-      if (savedSessions) {
-        const sessionsArr: Session[] = JSON.parse(savedSessions);
-        // Find the last session that was completed or ongoing
-        const sorted = sessionsArr.slice().sort((a, b) => Number(b.id) - Number(a.id));
-        setLastSession(sorted[0] || null);
+    const fetchTutors = async () => {
+      const { data, error } = await supabase.from('tutor_information').select('*');
+      if (error) {
+        toast.error('Failed to fetch tutors: ' + error.message);
+        return;
       }
-    }
+      console.log('Fetched tutors:', data);
+
+      // Only keep tutors with non-empty availability
+      const mappedTutors = data
+        .filter(t => Array.isArray(t.availability) && t.availability.length > 0)
+        .map(t => ({
+          id: t.id,
+          name: t.name || `${t.first_name} ${t.last_name}`,
+          rating: t.rating || 4.0,
+          totalSessions: t.total_sessions || 0,
+          credits_earned: t.credits_earned || 0,
+          subjects: t.subjects || ['General'],
+          hourlyRate: t.hourly_rate || 10,
+          availability: t.availability,
+          isFavorite: t.is_favorite || false,
+          isOnline: t.is_online || false,
+          qualifications: t.qualification || '',
+          verified_document: t.verified_document || ''
+        }));
+
+      setTutors(mappedTutors);
+    };
+
+    fetchTutors();
+  }, []);
+
+  useEffect(() => {
     const savedSessions = localStorage.getItem('tutorSessions');
     if (savedSessions) {
       setSessions(JSON.parse(savedSessions));
     }
-
-    const mockTutors: Tutor[] = [
-      {
-        id: 'b1a7e2c0-1f2b-4e3a-9c1d-1234567890ab',
-        name: 'Sarah Johnson',
-        rating: 4.9,
-        totalSessions: 247,
-        subjects: ['Mathematics', 'Physics'],
-        hourlyRate: 15,
-        availability: [
-          { day: 'Monday', times: ['09:00', '10:00', '14:00', '15:00'] },
-          { day: 'Tuesday', times: ['09:00', '11:00', '16:00'] },
-          { day: 'Wednesday', times: ['10:00', '14:00', '15:00', '16:00'] }
-        ],
-        isFavorite: true,
-        isOnline: true,
-        bio: 'Experienced Mathematics tutor with 5+ years of teaching experience.',
-        qualifications: ['M.Sc Mathematics', 'Teaching Certificate', 'PhD candidate'],
-        verified_document: '' // placeholder for document URL
-      },
-      {
-        id: 'c2b8f3d1-2e3c-5f4b-8d2e-2345678901bc',
-        name: 'Dr. Michael Brown',
-        rating: 4.8,
-        totalSessions: 189,
-        subjects: ['Physics', 'Chemistry'],
-        hourlyRate: 20,
-        availability: [
-          { day: 'Monday', times: ['11:00', '15:00', '16:00'] },
-          { day: 'Thursday', times: ['09:00', '10:00', '14:00'] },
-          { day: 'Friday', times: ['13:00', '14:00', '15:00'] }
-        ],
-        isFavorite: false,
-        isOnline: true,
-        bio: 'PhD in Physics with specialization in quantum mechanics and thermodynamics.',
-        qualifications: ['PhD Physics', '10+ years experience', 'Research publications'],
-        verified_document: ''
-      },
-      {
-        id: 'd3c9a4e2-3f4d-6a5c-9e3f-3456789012cd',
-        name: 'Emma Davis',
-        rating: 4.7,
-        totalSessions: 156,
-        subjects: ['English', 'History'],
-        hourlyRate: 12,
-        availability: [
-          { day: 'Tuesday', times: ['10:00', '11:00', '15:00'] },
-          { day: 'Wednesday', times: ['09:00', '13:00', '16:00'] },
-          { day: 'Saturday', times: ['10:00', '11:00', '14:00'] }
-        ],
-        isFavorite: true,
-        isOnline: false,
-        bio: 'Literature enthusiast with expertise in creative writing and essay composition.',
-        qualifications: ['B.A English Literature', 'TEFL Certified', '3 years experience'],
-        verified_document: ''
-      }
-    ];
 
     // Only add mock sessions if no saved sessions exist
     if (!savedSessions) {
@@ -245,40 +308,165 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
       localStorage.setItem('tutorSessions', JSON.stringify(mockSessions));
     }
 
-    // Mock student timetable (for conflict checking)
-    const mockTimetable = [
-      { day: 'Monday', time: '09:00', subject: 'Chemistry Class' },
-      { day: 'Monday', time: '14:00', subject: 'Math Study Group' },
-      { day: 'Tuesday', time: '10:00', subject: 'Physics Lab' },
-      { day: 'Wednesday', time: '15:00', subject: 'English Literature' }
-    ];
-
-    setTutors(mockTutors);
-    setStudentTimetable(mockTimetable);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("thankyou") === "1") {
+      setShowThankYou(true);
+      // Find the most recent completed or ongoing session
+      const savedSessions = localStorage.getItem('tutorSessions');
+      if (savedSessions) {
+        const sessionsArr: Session[] = JSON.parse(savedSessions);
+        // Find the last session that was completed or ongoing
+        const sorted = sessionsArr.slice().sort((a, b) => Number(b.id) - Number(a.id));
+        setLastSession(sorted[0] || null);
+      }
+    }
   }, []);
 
-  const checkTimeConflict = (day: string, time: string) => {
+  const checkTimeConflict = (date: string, time: string) => {
     return studentTimetable.some(item =>
-      item.day === day && item.time === time
+      item.date === date && item.time === time
     );
   };
 
+  // Helper to update credits for student and tutor
+async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: number) {
+  try {
+    // 1️⃣ Update student credits
+    const { data: studentData, error: studentFetchError } = await supabase
+      .from('student_information')
+      .select('credits')
+      .eq('id', studentId)
+      .single();
+
+    if (studentFetchError || !studentData) {
+      toast.error("Failed to fetch student credits: " + studentFetchError?.message);
+      return;
+    }
+
+    const { error: studentUpdateError } = await supabase
+      .from('student_information')
+      .update({ credits: studentData.credits - cost })
+      .eq('id', studentId);
+
+    if (studentUpdateError) {
+      toast.error("Failed to update student credits: " + studentUpdateError.message);
+      return;
+    }
+
+    // 2️⃣ Fetch current tutor info first
+    const { data: tutorData, error: tutorFetchError } = await supabase
+      .from('tutor_information')
+      .select('credits_earned, total_sessions')
+      .eq('id', tutorId)
+      .single();
+
+    if (tutorFetchError || !tutorData) {
+      toast.error("Failed to fetch tutor info: " + tutorFetchError?.message);
+      return;
+    }
+
+    // 3️⃣ Update tutor credits and total sessions
+    const { data: updatedTutor, error: tutorUpdateError } = await supabase
+      .from('tutor_information')
+      .update({
+        credits_earned: (tutorData.credits_earned || 0) + cost,
+        total_sessions: (tutorData.total_sessions || 0) + 1
+      })
+      .eq('id', tutorId)
+      .select('*');
+
+    if (tutorUpdateError) {
+      toast.error("Failed to update tutor info: " + tutorUpdateError.message);
+      return;
+    }
+
+    if (!updatedTutor) {
+      console.error('No tutor returned from update', tutorId);
+      toast.error("Failed to update tutor info: no row returned");
+      return;
+    }
+
+    // 4️⃣ Update local state safely
+    setTutors(prev =>
+      prev.map(t =>
+        t.id === tutorId
+          ? {
+              ...t,
+              credits_earned: updatedTutor[0]?.credits_earned ?? 0,
+              totalSessions: updatedTutor[0]?.total_sessions ?? 0,
+            }
+          : t
+      )
+    );
+
+    toast.success("Credits and session count updated!");
+  } catch (err: any) {
+    toast.error("Error updating credits/sessions: " + err.message);
+  }
+}
+
+  const FAVORITES_KEY = user?.id ? `favoriteTutors_${user.id}` : 'favoriteTutors';
+
+  const saveFavorites = (ids: string[]) => {
+    if (user?.id) localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
+  };
+
+  const loadFavorites = (): string[] => {
+    if (user?.id) {
+      try {
+        return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    // Load favorites from localStorage per user
+    const favs = loadFavorites();
+    setTutors(prev =>
+      prev.map(t => ({
+        ...t,
+        isFavorite: favs.includes(t.id)
+      }))
+    );
+  }, [user?.id, tutors.length]);
+
   const toggleFavorite = (tutorId: string) => {
+    const favs = loadFavorites();
+    const newFavs = favs.includes(tutorId)
+      ? favs.filter(id => id !== tutorId)
+      : [...favs, tutorId];
+    saveFavorites(newFavs);
     setTutors(prev =>
       prev.map(tutor =>
         tutor.id === tutorId
-          ? { ...tutor, isFavorite: !tutor.isFavorite }
+          ? { ...tutor, isFavorite: newFavs.includes(tutorId) }
           : tutor
       )
     );
     toast.success('Favorites updated!');
   };
 
-  const bookSession = async (tutorId: string, day: string, time: string) => {
+  // Book session and update credits
+  const bookSession = async (tutorId: string, date: string, time: string) => {
     const tutor = tutors.find(t => t.id === tutorId);
     if (!tutor) return;
 
-    if (checkTimeConflict(day, time)) {
+    // Check if slot is already booked by any student
+    if (
+      bookedSlots[tutorId] &&
+      bookedSlots[tutorId][date] &&
+      bookedSlots[tutorId][date].includes(time)
+    ) {
+      toast.error('This slot is already booked. Please choose another time.');
+      return;
+    }
+
+    const subject = selectedTutorSubjects[tutorId] || tutor.subjects[0];
+
+    if (checkTimeConflict(date, time)) {
       toast.error('Time conflict! You have another commitment at this time.');
       return;
     }
@@ -288,17 +476,15 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
       return;
     }
 
-    // Calculate date for booking (simplified)
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const sessionDateObj = new Date(date);
 
     const newSession: Session = {
       id: Date.now().toString(),
       tutorId: tutor.id,
       tutorName: tutor.name,
-      subject: selectedSubject !== 'all' ? selectedSubject : tutor.subjects[0],
+      subject,
       difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',
-      date: tomorrow.toISOString().split('T')[0],
+      date: sessionDateObj.toISOString().split('T')[0], // store as string "YYYY-MM-DD"
       time: time,
       duration: 60,
       cost: tutor.hourlyRate,
@@ -306,141 +492,136 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
       type: 'booked'
     };
 
-    const updatedSessions = [...sessions, newSession];
-    setSessions(updatedSessions);
-    localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
-
-    // Save to Supabase tutor_sessions table
-    // Only attempt to save if IDs are valid UUIDs (basic check)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (uuidRegex.test(tutor.id) && uuidRegex.test(user.id)) {
-      try {
-        const { error } = await supabase.from('tutor_sessions').insert([
-          {
-            tutor_id: tutor.id,
-            tutor_name: tutor.name,
-            student_id: user.id,
-            subject: newSession.subject,
-            difficulty: newSession.difficulty,
-            date: newSession.date,
-            time: newSession.time,
-            duration: newSession.duration,
-            cost: newSession.cost,
-            status: newSession.status,
-            type: newSession.type
-          }
-        ]);
-        if (error) {
-          toast.error('Failed to save session to database: ' + error.message);
+    // Save session to Supabase
+    try {
+      await supabase.from('tutor_sessions').insert([
+        {
+          tutor_id: tutor.id,
+          tutor_first_name: tutor.name.split(' ')[0],
+          tutor_last_name: tutor.name.split(' ').slice(1).join(' '),
+          student_id: user.id,
+          subject: newSession.subject,
+          difficulty: newSession.difficulty,
+          date: newSession.date, // <-- correct date string
+          time: newSession.time,
+          duration: newSession.duration,
+          cost: newSession.cost,
+          status: newSession.status,
+          type: newSession.type
         }
-      } catch (err: any) {
-        toast.error('Error saving session to database: ' + (err?.message || err));
+      ]);
+      await updateCreditsOnBooking(user.id, tutor.id, tutor.hourlyRate);
+      toast.success(`Session booked with ${tutor.name} for ${newSession.date} at ${time}!`);
+      setLastBooked({ tutorId, day: newSession.date, time });
+      setShowBookingConfirm(true);
+      // Refresh sessions from Supabase
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select('*')
+        .eq('student_id', user.id)
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+      if (!error && data) {
+        const mappedSessions = data.map((s: any) => ({
+          id: s.id?.toString() ?? Date.now().toString(),
+          tutorId: s.tutor_id,
+          tutorName: `${s.tutor_first_name ?? ''} ${s.tutor_last_name ?? ''}`.trim(),
+          subject: s.subject,
+          difficulty: s.difficulty,
+          date: s.date,
+          time: s.time,
+          duration: s.duration,
+          cost: s.cost,
+          status: s.status,
+          type: s.type
+        }));
+        setSessions(mappedSessions);
       }
-    } else {
-      toast.error('Session not saved to database: tutor_id or student_id is not a valid UUID.');
-    }
-
-    // Dispatch custom event to notify calendar component
-    window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
-
-    setLastBooked({ tutorId, day, time });
-    setShowBookingConfirm(true);
-    toast.success(`Session booked with ${tutor.name} for ${day} at ${time}!`);
-  };
-
-  const startInstantSession = () => {
-    // Check if user is a student wanting to earn credits by helping others
-    if (user.role === 'student') {
-      // Show option to either get help or help others
-      const shouldHelpOthers = confirm(
-        'Would you like to:\n\n' +
-        '• Click "OK" to HELP other students and earn free credits\n' +
-        '• Click "Cancel" to GET HELP from a tutor (costs credits)\n\n' +
-        'Helping others is a great way to reinforce your own learning!'
-      );
-
-      if (shouldHelpOthers) {
-        // Student wants to help others - assign them to help a random student
-        const studentsNeedingHelp = [
-          { name: 'Alex Chen', subject: 'Mathematics', difficulty: 'Intermediate', topic: 'Calculus derivatives' },
-          { name: 'Emma Wilson', subject: 'Physics', difficulty: 'Beginner', topic: 'Newton\'s laws' },
-          { name: 'David Kim', subject: 'Chemistry', difficulty: 'Advanced', topic: 'Organic reactions' },
-          { name: 'Lisa Martinez', subject: 'Biology', difficulty: 'Intermediate', topic: 'Cell division' }
-        ];
-
-        const randomStudent = studentsNeedingHelp[Math.floor(Math.random() * studentsNeedingHelp.length)];
-
-        const now = new Date();
-        const newSession: Session = {
-          id: Date.now().toString(),
-          tutorId: '1', // Current user acts as tutor
-          tutorName: `${user.first_name} ${user.last_name}`,
-          subject: randomStudent.subject,
-          difficulty: randomStudent.difficulty,
-          date: now.toISOString().split('T')[0],
-          time: now.toTimeString().substring(0, 5),
-          duration: 60,
-          cost: -5, // Negative cost means they earn credits
-          status: 'ongoing',
-          type: 'instant'
-        };
-
-        const updatedSessions = [...sessions, newSession];
-        setSessions(updatedSessions);
-        localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
-
-        window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
-
-        toast.success(`🎉 You've been matched with ${randomStudent.name} who needs help with ${randomStudent.topic}! You'll earn 5 credits for helping. Good luck!`);
-
-        setTimeout(() => {
-          enterMeeting(newSession.id);
-        }, 3000);
-        return;
-      }
-    }
-
-    // Regular instant session - get help from a tutor
-    const availableTutors = tutors.filter(t => t.isOnline);
-    if (availableTutors.length === 0) {
-      toast.error('No tutors available for instant sessions right now.');
+    } catch (err: any) {
+      toast.error('Error booking session: ' + (err?.message || err));
       return;
     }
+  };
 
-    const randomTutor = availableTutors[Math.floor(Math.random() * availableTutors.length)];
+  const startInstantSession = async () => {
+  // Fetch online tutors from Supabase (real tutors)
+  const { data: onlineTutors, error } = await supabase
+    .from('tutor_information')
+    .select('*')
+    .eq('is_online', true);
 
-    if (user.credits < randomTutor.hourlyRate) {
-      toast.error('Insufficient credits for instant session.');
+  if (error || !onlineTutors || onlineTutors.length === 0) {
+    toast.error('No tutors available for instant sessions right now.');
+    return;
+  }
+
+  // Randomly pick a tutor
+  const randomTutor = onlineTutors[Math.floor(Math.random() * onlineTutors.length)];
+
+  if (user.credits < randomTutor.hourly_rate) {
+    toast.error('Insufficient credits for instant session.');
+    return;
+  }
+
+  const now = new Date();
+const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const newSession: Session = {
+    id: Date.now().toString(),
+    tutorId: randomTutor.id,
+    tutorName: `${randomTutor.first_name} ${randomTutor.last_name}`,
+    subject: selectedSubject !== 'all' ? selectedSubject : randomTutor.subjects?.[0] || 'General',
+    difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',
+    date: localDate,
+    time: localTime,
+    duration: 60,
+    cost: randomTutor.hourly_rate,
+    status: 'ongoing',
+    type: 'instant'
+  };
+
+  // Save to sessions state
+  const updatedSessions = [...sessions, newSession];
+  setSessions(updatedSessions);
+  localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
+
+  // Save to Supabase tutor_sessions table
+  try {
+    const { error: insertError } = await supabase.from('tutor_sessions').insert([
+      {
+        tutor_id: randomTutor.id,
+        tutor_first_name: randomTutor.first_name,
+        tutor_last_name: randomTutor.last_name,
+        student_id: user.id,
+        subject: newSession.subject,
+        difficulty: newSession.difficulty,
+        date: newSession.date,
+        time: newSession.time,
+        duration: newSession.duration,
+        cost: newSession.cost,
+        status: newSession.status,
+        type: newSession.type
+      }
+    ]);
+    if (insertError) {
+      toast.error('Failed to save instant session: ' + insertError.message);
       return;
     }
+  } catch (err: any) {
+    toast.error('Error saving instant session: ' + (err?.message || err));
+    return;
+  }
 
-    const now = new Date();
-    const newSession: Session = {
-      id: Date.now().toString(),
-      tutorId: randomTutor.id,
-      tutorName: randomTutor.name,
-      subject: selectedSubject !== 'all' ? selectedSubject : randomTutor.subjects[0],
-      difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',
-      date: now.toISOString().split('T')[0],
-      time: now.toTimeString().substring(0, 5),
-      duration: 60,
-      cost: randomTutor.hourlyRate,
-      status: 'ongoing',
-      type: 'instant'
-    };
+  toast.success(`Instant session started with ${randomTutor.first_name} ${randomTutor.last_name}!`);
 
-    const updatedSessions = [...sessions, newSession];
-    setSessions(updatedSessions);
-    localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
+  // Dispatch update event
+  window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
 
-    window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
-
-    toast.success(`Instant session started with ${randomTutor.name}!`);
-
-    setTimeout(() => {
-      enterMeeting(newSession.id);
-    }, 2000);
-  };
+  // Enter the meeting after a short delay
+  setTimeout(() => {
+    enterMeeting(newSession.id);
+  }, 2000);
+};
 
   const enterMeeting = (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
@@ -463,13 +644,20 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
     window.location.href = `/meeting/${sessionId}`;
   };
 
-  const filteredTutors = tutors.filter(tutor => {
+  // Sort tutors: favorites first
+  const favoriteIds = loadFavorites();
+  const sortedTutors = [
+    ...tutors.filter(t => t.isFavorite),
+    ...tutors.filter(t => !t.isFavorite)
+  ];
+
+  const filteredTutors = sortedTutors.filter(tutor => {
+    const hasAvailability = tutor.availability && tutor.availability.length > 0;
     const matchesSubject = selectedSubject === 'all' || tutor.subjects.includes(selectedSubject);
     const matchesSearch = searchQuery === '' ||
       tutor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       tutor.subjects.some(subject => subject.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    return matchesSubject && matchesSearch;
+    return hasAvailability && matchesSubject && matchesSearch;
   });
 
   const favoriteTutors = tutors.filter(tutor => tutor.isFavorite);
@@ -520,6 +708,119 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
       toast.success(`You earned ${expEarned} experience for completing a session!`);
     }
   };
+
+  // Add state for selected subject per tutor
+  const [selectedTutorSubjects, setSelectedTutorSubjects] = useState<{ [tutorId: string]: string }>({});
+
+  // Helper to get booked slots for each tutor
+  const [bookedSlots, setBookedSlots] = useState<{ [tutorId: string]: { [date: string]: string[] } }>({});
+
+  useEffect(() => {
+    async function fetchBookedSlots() {
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select('tutor_id, date, time');
+      if (error || !data) return;
+
+      const slotMap: { [tutorId: string]: { [date: string]: string[] } } = {};
+
+      data.forEach((row: any) => {
+        const dateKey = row.date.split('T')[0]; // Take only YYYY-MM-DD
+        const timeKey = row.time.slice(0, 5); // "14:00"
+
+        if (!slotMap[row.tutor_id]) slotMap[row.tutor_id] = {};
+        if (!slotMap[row.tutor_id][dateKey]) slotMap[row.tutor_id][dateKey] = [];
+        slotMap[row.tutor_id][dateKey].push(timeKey);
+      });
+
+      setBookedSlots(slotMap);
+    }
+    if (tutors.length > 0) fetchBookedSlots();
+  }, [tutors]);
+
+  // Fetch sessions from Supabase for "My Sessions" tab
+  useEffect(() => {
+    async function fetchSupabaseSessions() {
+      if (!user?.id) return;
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select('*')
+        .eq('student_id', user.id)
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+      if (error) {
+        toast.error('Failed to fetch sessions: ' + error.message);
+        return;
+      }
+      // Map data to Session interface
+      const mappedSessions = (data || []).map((s: any) => ({
+        id: s.id?.toString() ?? Date.now().toString(),
+        tutorId: s.tutor_id,
+        tutorName: `${s.tutor_first_name ?? ''} ${s.tutor_last_name ?? ''}`.trim(),
+        subject: s.subject,
+        difficulty: s.difficulty,
+        date: s.date,
+        time: s.time,
+        duration: s.duration,
+        cost: s.cost,
+        status: s.status,
+        type: s.type
+      }));
+      setSessions(mappedSessions);
+    }
+    fetchSupabaseSessions();
+  }, [user?.id]);
+
+  // Add this function above your return statement
+const quickBookFavorite = async (tutor: Tutor) => {
+  if (!tutor.isOnline) {
+    toast.error('Tutor is not online for instant session.');
+    return;
+  }
+  if (user.credits < tutor.hourlyRate) {
+    toast.error('Insufficient credits for instant session.');
+    return;
+  }
+  const now = new Date();
+const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const newSession: Session = {
+    id: Date.now().toString(),
+    tutorId: tutor.id,
+    tutorName: tutor.name,
+    subject: tutor.subjects[0],
+    difficulty: 'Intermediate',
+    date: localDate,
+    time: localTime,
+    duration: 60,
+    cost: tutor.hourlyRate,
+    status: 'ongoing',
+    type: 'instant'
+  };
+  try {
+    await supabase.from('tutor_sessions').insert([{
+      tutor_id: tutor.id,
+      tutor_first_name: tutor.name.split(' ')[0],
+      tutor_last_name: tutor.name.split(' ').slice(1).join(' '),
+      student_id: user.id,
+      subject: newSession.subject,
+      difficulty: newSession.difficulty,
+      date: newSession.date,
+      time: newSession.time,
+      duration: newSession.duration,
+      cost: newSession.cost,
+      status: newSession.status,
+      type: newSession.type
+    }]);
+    await updateCreditsOnBooking(user.id, tutor.id, tutor.hourlyRate);
+    toast.success(`Instant session started with ${tutor.name}!`);
+    setLastBooked({ tutorId: tutor.id, day: newSession.date, time: newSession.time });
+    setShowBookingConfirm(true);
+    enterMeeting(newSession.id);
+  } catch (err: any) {
+    toast.error('Error booking instant session: ' + (err?.message || err));
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -632,7 +933,7 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
 
             <Button onClick={startInstantSession} className="w-full">
               <Zap className="h-4 w-4 mr-2" />
-              {user.role === 'student' ? 'Get Help or Help Others' : 'Instant Session'}
+              {user.role === 'student' ? 'Get Instant Help' : 'Instant Session'}
             </Button>
           </div>
         </CardContent>
@@ -705,53 +1006,60 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <p className="text-sm text-muted-foreground">{tutor.bio}</p>
-
+                      
                       <div>
                         <h4 className="text-sm font-medium mb-2">Subjects</h4>
-                        <div className="flex flex-wrap gap-1">
-                          {tutor.subjects.map(subject => (
-                            <Badge key={subject} variant="outline" className="text-xs">
-                              {subject}
-                            </Badge>
-                          ))}
-                        </div>
+                        <Select
+                          value={selectedTutorSubjects[tutor.id] || tutor.subjects[0]}
+                          onValueChange={val =>
+                            setSelectedTutorSubjects(prev => ({ ...prev, [tutor.id]: val }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select subject" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tutor.subjects.map(subject => (
+                              <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-
                       <div>
                         <h4 className="text-sm font-medium mb-2">Qualifications</h4>
-                        <div className="flex flex-wrap gap-1">
-                          {tutor.qualifications.map((qual, index) => (
-                            <Badge key={index} variant="secondary" className="text-xs">
-                              {qual}
-                            </Badge>
-                          ))}
-                        </div>
+                        <p className="text-xs text-muted-foreground">{tutor.qualifications}</p>
                       </div>
-
                       <div>
                         <h4 className="text-sm font-medium mb-2">Available Times</h4>
                         <div className="space-y-2">
-                          {tutor.availability.slice(0, 2).map((day) => (
+                          {tutor.availability.map((day) => (
                             <div key={day.day} className="text-xs">
                               <span className="font-medium">{day.day}:</span>
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {day.times.map(time => {
                                   const hasConflict = checkTimeConflict(day.day, time);
-                                  const isBooked = lastBooked && lastBooked.tutorId === tutor.id && lastBooked.day === day.day && lastBooked.time === time;
+                                  const slotDate = getNextDateForWeekdayLocal(day.day); // "YYYY-MM-DD"
+                                  const isBooked = bookedSlots[tutor.id]?.[slotDate]?.includes(time) ?? false;
+
                                   return (
                                     <Button
                                       key={time}
                                       size="sm"
-                                      variant={hasConflict ? "destructive" : isBooked ? "secondary" : "outline"}
-                                      className={`text-xs h-6 px-2 ${isBooked ? 'border-green-500 text-green-700 bg-green-50' : ''}`}
-                                      onClick={() => bookSession(tutor.id, day.day, time)}
-                                      disabled={hasConflict}
-                                      title={hasConflict ? 'Time conflict with your schedule' : `Book ${time} session`}
+                                      variant={isBooked ? "destructive" : hasConflict ? "destructive" : "outline"}
+                                      className={`text-xs h-6 px-2 ${isBooked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                      onClick={() => !isBooked && bookSession(tutor.id, slotDate, time)}
+                                      disabled={isBooked || hasConflict}
+                                      title={
+                                        isBooked
+                                          ? 'This slot is already booked'
+                                          : hasConflict
+                                            ? 'Time conflict with your schedule'
+                                            : `Book ${time} session`
+                                      }
                                     >
                                       {time}
-                                      {isBooked && <CheckCircle className="h-3 w-3 ml-1 text-green-500" />}
-                                      {hasConflict && <AlertTriangle className="h-3 w-3 ml-1" />}
+                                      {isBooked && <AlertTriangle className="h-3 w-3 ml-1" />}
+                                      {hasConflict && !isBooked && <AlertTriangle className="h-3 w-3 ml-1" />}
                                     </Button>
                                   );
                                 })}
@@ -770,7 +1078,16 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
                                       </DialogDescription>
                                     </DialogHeader>
                                     <DialogFooter>
-                                      <Button onClick={() => setShowBookingConfirm(false)} className="w-full mt-2">Close</Button>
+                                      <Button
+                                        onClick={() => {
+                                          setShowBookingConfirm(false);
+                                          // Restore focus to the button that triggered the dialog
+                                          openDialogButtonRef.current?.focus();
+                                        }}
+                                        className="w-full mt-2"
+                                      >
+                                        Close
+                                      </Button>
                                     </DialogFooter>
                                   </DialogContent>
                                 </Dialog>
@@ -839,9 +1156,13 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <Button className="w-full" onClick={() => toast.info('Quick booking feature coming soon!')}>
+                    <Button
+                      className="w-full"
+                      onClick={() => quickBookFavorite(tutor)}
+                      disabled={!tutor.isOnline}
+                    >
                       <Calendar className="h-4 w-4 mr-2" />
-                      Quick Book
+                      {tutor.isOnline ? "Quick Start (Instant Session)" : "Tutor Offline"}
                     </Button>
                   </CardContent>
                 </Card>
@@ -952,4 +1273,23 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
     </div>
   );
 }
+
+function getNextDateForWeekdayLocal(weekday: string) {
+  const daysOfWeek = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const today = new Date();
+  const todayIndex = today.getDay();
+  const targetIndex = daysOfWeek.indexOf(weekday);
+
+  let delta = targetIndex - todayIndex;
+  if (delta <= 0) delta += 7; // <= to skip today
+  const nextDate = new Date(today);
+  nextDate.setDate(today.getDate() + delta);
+
+  // Format as YYYY-MM-DD in LOCAL timezone
+  const year = nextDate.getFullYear();
+  const month = String(nextDate.getMonth() + 1).padStart(2, "0");
+  const day = String(nextDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 

@@ -123,17 +123,7 @@ export const TodoList: React.FC<TodoListProps> = ({ user }) => {
   };
 
   const stats = getStats();
-  const filteredTodos = getFilteredTodos(filter).sort((a, b) => {
-    // First: sort by status
-    const statusOrder: Record<string, number> = { Overdue: 0, Today: 1, Upcoming: 2, Completed: 3 };
-    const aStatus = a.status ?? '';
-    const bStatus = b.status ?? '';
-    if (statusOrder[aStatus] !== statusOrder[bStatus]) {
-      return (statusOrder[aStatus] ?? 99) - (statusOrder[bStatus] ?? 99);
-    }
-    // Then: sort by priority within same status
-    return priorityOrder[a.priority] - priorityOrder[b.priority];
-  });
+  const filteredTodos = getFilteredTodos(filter);
 
   return (
     <div className="space-y-6">

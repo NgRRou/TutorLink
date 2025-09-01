@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Meeting } from './components/Meeting';
 import { LoginForm } from "./components/LoginForm";
@@ -26,7 +26,7 @@ import { TutorSessions } from "./components/TutorSessions";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import ProfileSettings from './components/ProfileSettings';
 
-const CLIENT_ID = "946439376376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com";
+const CLIENT_ID = "946439376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com";
 
 interface User {
   id: string;
@@ -43,7 +43,6 @@ interface User {
   weak_subjects: string[];
   preferred_learning_style: string;
 }
-
 
 function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, onLogout: () => void, accessToken: string, onCreditsUpdate: (credits: number) => void }) {
   const location = useLocation();
@@ -126,7 +125,29 @@ function AppRoutes() {
   type AuthView = 'login' | 'signup' | 'dashboard' | 'loading';
   const [currentView, setCurrentView] = useState<AuthView>('loading');
   const [user, setUser] = useState<User | null>(null);
-  // This function will be passed to all children and header for instant credit updates
+
+  useEffect(() => {
+    if (!user || user.role !== 'tutor') return;
+
+    const markOnline = async () => {
+      await supabase.from('tutor_information').update({ is_online: true }).eq('id', user.id);
+    };
+
+    markOnline();
+    const interval = setInterval(markOnline, 30000);
+
+    const handleUnload = () => {
+      const url = `${process.env.REACT_APP_SUPABASE_URL}/rest/v1/tutor_information?id=eq.${user.id}`;
+      navigator.sendBeacon(url, JSON.stringify({ is_online: false }));
+    };
+    window.addEventListener('unload', handleUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [user]);
+
   const handleCreditsUpdate = (newCredits: number) => {
     setUser(prev => prev ? { ...prev, credits: newCredits } : prev);
   };
@@ -136,56 +157,76 @@ function AppRoutes() {
   const navigate = useNavigate();
 
   const fetchUserProfile = async (accessToken: string) => {
-    // Get the real user from Supabase Auth
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
       toast.error('Failed to fetch user profile.');
       setUser(null);
       setCurrentView('login');
       return;
     }
-    // Fetch additional profile info from your DB if needed
-    const { data: profileData } = await supabase
+
+    const userId = authData.user.id;
+
+    const { data: studentData } = await supabase
       .from('student_information')
       .select('*')
-      .eq('id', data.user.id)
+      .eq('id', userId)
       .maybeSingle();
-    if (!profileData) {
-      toast.error('No profile found for this user. Please complete your profile setup.');
+
+    if (studentData) {
       setUser({
-        id: data.user.id,
-        first_name: '',
-        last_name: '',
-        email: data.user.email || '',
-        credits: 0,
+        id: userId,
+        first_name: studentData.first_name || '',
+        last_name: studentData.last_name || '',
+        email: authData.user.email || '',
+        credits: studentData.credits || 0,
         role: 'student',
-        experience: 0,
-        level: 1,
-        total_earnings: 0,
-        streak: 0,
-        sessions_completed: 0,
-        weak_subjects: [],
-        preferred_learning_style: ''
+        experience: studentData.experience || 0,
+        level: studentData.level || 1,
+        total_earnings: studentData.total_earnings || 0,
+        streak: studentData.streak || 0,
+        sessions_completed: studentData.sessions_completed || 0,
+        weak_subjects: studentData.weak_subjects || [],
+        preferred_learning_style: studentData.preferred_learning_style || ''
       });
       setCurrentView('dashboard');
       return;
     }
-    setUser({
-      id: data.user.id, // UUID from Supabase Auth
-      first_name: profileData.first_name || '',
-      last_name: profileData.last_name || '',
-      email: data.user.email || '',
-      credits: profileData.credits || 0,
-      role: profileData.role || 'student',
-      experience: profileData.experience || 0,
-      level: profileData.level || 1,
-      total_earnings: profileData.total_earnings || 0,
-      streak: profileData.streak || 0,
-      sessions_completed: profileData.sessions_completed || 0,
-      weak_subjects: profileData.weak_subjects || [],
-      preferred_learning_style: profileData.preferred_learning_style || ''
-    });
-    setCurrentView('dashboard');
+
+    const { data: tutorData } = await supabase
+      .from('tutor_information')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (tutorData) {
+      const userId = authData.user.id;
+      supabase
+        .from('tutor_information')
+        .update({ is_online: true })
+        .eq('id', userId);
+
+      setUser({
+        id: userId,
+        first_name: tutorData.first_name || '',
+        last_name: tutorData.last_name || '',
+        email: authData.user.email || '',
+        credits: tutorData.credits_earned || 0,
+        role: 'tutor',
+        experience: tutorData.total_sessions || 0,
+        level: 1, 
+        total_earnings: tutorData.total_earnings || 0,
+        streak: 0,
+        sessions_completed: tutorData.total_sessions || 0,
+        weak_subjects: [],
+        preferred_learning_style: ''
+      });
+
+      setCurrentView('dashboard');
+      return;
+    }
+
+    toast.error('No profile found for this user. Please complete your profile setup.');
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -219,100 +260,107 @@ function AppRoutes() {
     lastName: string;
     email: string;
     password: string;
-    qualifications?: string[];
-    subjects?: string[];
     role: string;
+    documents?: File[];
+    subjects?: string[];
+    qualification?: string; 
   }) => {
     try {
-      if (userData.role === 'student') {
-        const { data, error: authError } = await supabase.auth.signUp({
-          email: userData.email,
-          password: userData.password,
-          options: {
-            data: {
-              display_name: `${userData.firstName} ${userData.lastName}`,
-              first_name: userData.firstName,
-              last_name: userData.lastName,
-              role: 'student'
-            }
-          }
-        });
-        if (authError) {
-          toast.error(`Signup failed: ${authError.message}`);
-          return;
-        }
-        const userId = data?.user?.id;
-        if (!userId) {
-          toast.error('No user id returned from Auth signup.');
-          return;
-        }
-        await supabase.from('student_information').insert([
-          { id: userId, first_name: userData.firstName, last_name: userData.lastName, email: userData.email, credits: 0, role: 'student', experience: 0, level: 1, total_earnings: 0, streak: 0, sessions_completed: 0, weak_subjects: [], preferred_learning_style: '' }
-        ]);
-        toast.success('Student account created! Please sign in.');
-        setCurrentView('login');
-        navigate('/login');
-      } else if (userData.role === 'tutor') {
-        const { data, error: authError } = await supabase.auth.signUp({
-          email: userData.email,
-          password: userData.password,
-          options: {
-            data: {
-              display_name: `${userData.firstName} ${userData.lastName}`,
-              first_name: userData.firstName,
-              last_name: userData.lastName,
-              role: 'tutor',
-              subjects: userData.subjects || [],
-              qualifications: userData.qualifications || []
-            }
-          }
-        });
-        if (authError) {
-          toast.error(`Signup failed: ${authError.message}`);
-          return;
-        }
-        const tutorId = data?.user?.id;
-        if (!tutorId) {
-          toast.error('No user id returned from Auth signup.');
-          return;
-        }
-        await supabase.from('tutor_information').insert([
-          {
-            id: tutorId,
+      const { data, error: authError } = await supabase.auth.signUp({
+        email: userData.email,
+        password: userData.password,
+        options: {
+          data: {
+            display_name: `${userData.firstName} ${userData.lastName}`,
             first_name: userData.firstName,
             last_name: userData.lastName,
-            email: userData.email,
-            role: 'tutor',
-            rating: 0.0,
-            total_sessions: 0,
-            subjects: userData.subjects || [],
-            qualifications: userData.qualifications || [],
-            is_favorite: false,
-            is_online: false,
-            credits_earned: 0,
-            is_verified: true
+            role: userData.role
           }
-        ]);
-        toast.success('Tutor account created! Please sign in.');
-        setCurrentView('login');
-        navigate('/login');
+        }
+      });
+
+      if (authError) {
+        toast.error(`Signup failed: ${authError.message}`);
+        return;
       }
+
+      const userId = data?.user?.id;
+      if (!userId) {
+        toast.error('No user ID returned from Auth signup.');
+        return;
+      }
+
+      const qualificationRates: Record<string, number> = {
+        primary: 10,
+        high: 15,
+        bachelor: 20,
+        master: 25,
+        phd: 30
+      };
+
+      const { data: profile, error: insertError } = await supabase
+        .from(userData.role === 'student' ? 'student_information' : 'tutor_information')
+        .insert([
+          userData.role === 'student'
+            ? {
+                id: userId,
+                first_name: userData.firstName,
+                last_name: userData.lastName,
+                email: userData.email,
+                credits: 0,
+                role: 'student',
+                experience: 0,
+                level: 1,
+                streak: 0,
+                sessions_completed: 0,
+                weak_subjects: [],
+                preferred_learning_style: ''
+              }
+            : {
+                id: userId,
+                first_name: userData.firstName,
+                last_name: userData.lastName,
+                email: userData.email,
+                role: 'tutor',
+                rating: 0,
+                total_sessions: 0,
+                subjects: userData.subjects || [],
+                qualification: userData.qualification || '',
+                hourly_rate: qualificationRates[userData.qualification || 'primary'],
+                is_favorite: false,
+                is_online: false,
+                credits_earned: 0,
+                is_verified: true
+              }
+        ]);
+
+      if (insertError) {
+        toast.error(`Failed to create profile: ${insertError.message}`);
+        return;
+      }
+
+      toast.success('Account created! Please sign in.');
+      navigate('/login');
+
     } catch (error) {
       toast.error('An unexpected error occurred during signup.');
     }
   };
 
   const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setAccessToken('');
-      setCurrentView('login');
-      toast.success('Logged out successfully.');
-      navigate('/login');
-    } catch (error) {
-      toast.error('Error logging out.');
+    if (user?.role === 'tutor') {
+      await supabase
+        .from('tutor_information')
+        .update({ is_online: false })
+        .eq('id', user.id);
     }
+
+    await supabase.auth.signOut();
+    setUser(null);
+    setAccessToken('');
+    setCurrentView('login');
+    toast.success('Logged out successfully.');
+    navigate('/login');
   };
 
   const switchToSignup = () => {
@@ -323,6 +371,27 @@ function AppRoutes() {
     setCurrentView('login');
     navigate('/login');
   };
+
+  useEffect(() => {
+    const setOffline = async () => {
+      if (user?.role === 'tutor') {
+        await supabase
+          .from('tutor_information')
+          .update({ is_online: false })
+          .eq('id', user.id);
+      }
+    };
+
+    window.addEventListener('beforeunload', setOffline);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') setOffline();
+    });
+
+    return () => {
+      window.removeEventListener('beforeunload', setOffline);
+      window.removeEventListener('visibilitychange', setOffline);
+    };
+  }, [user?.id, user?.role]);
 
   return (
     <>
@@ -378,27 +447,7 @@ function AppRoutes() {
             ) : (
               <Route element={<Navigate to="/login" />} />
             )}
-            <Route
-              path="/profile-settings"
-              element={
-                accessToken && user ? (
-                  <ProfileSettings
-                    user={{
-                      id: user.id,
-                      email: user.email,
-                      firstName: user.first_name,
-                      lastName: user.last_name,
-                      role: user.role,
-                      level: user.level,
-                      streak: user.streak,
-                      preferredLearningStyle: user.preferred_learning_style,
-                    }}
-                  />
-                ) : (
-                  <Navigate to="/login" />
-                )
-              }
-            />
+            
             {/* Catch-all route */}
             <Route path="/*" element={<Navigate to={accessToken ? '/dashboard' : '/login'} />} />
           </Routes>

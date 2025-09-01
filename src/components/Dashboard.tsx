@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-// --- INTERFACES ---
 interface User {
   id: string;
   first_name: string;
@@ -19,6 +18,7 @@ interface User {
   preferred_learning_style: string;
   last_active?: string;
   favorite_tutors?: string[];
+  availability?: { day: string; times: string[] }[];
 }
 
 interface Progress {
@@ -34,6 +34,27 @@ interface Progress {
   };
   weeklyStats: Record<string, any>;
   monthlyStats: Record<string, any>;
+}
+
+function mapToUserInterface(data: any): User {
+  return {
+    id: data.id,
+    first_name: data.first_name ?? "",
+    last_name: data.last_name ?? "",
+    email: data.email ?? "",
+    credits: data.credits ?? 0,
+    role: data.role ?? "student",
+    experience: data.experience ?? 0,
+    level: data.level ?? 1,
+    total_earnings: data.total_earnings ?? 0,
+    sessions_completed: data.sessions_completed ?? 0,
+    streak: data.streak ?? 0,
+    weak_subjects: data.weak_subjects ?? [],
+    preferred_learning_style: data.preferred_learning_style ?? "visual",
+    last_active: data.last_active ?? null,
+    favorite_tutors: data.favorite_tutors ?? [],
+    availability: data.availability ?? [],
+  };
 }
 
 import { Button } from "./ui/button";
@@ -84,23 +105,53 @@ import {
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select";
 
 interface DashboardProps {
   onLogout: () => void;
   accessToken: string;
 }
 
+interface Session {
+  id: string;
+  subject: string;
+  date: string; 
+  time: string; 
+  cost: number;
+  student?: string; 
+  tutor_first_name?: string; 
+  tutor_last_name?: string;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) => {
   const [user, setUser] = useState<User | null>(null);
-  // Auto-level up: when experience reaches 300, increment level and update DB
+  const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
+  const now = new Date();
+
+  const upcoming = upcomingSessions.filter(session => {
+    const sessionDateTime = new Date(`${session.date}T${session.time}`);
+    return sessionDateTime.getTime() > Date.now();
+  });
+
+  upcoming.sort((a, b) => {
+    const aDate = new Date(`${a.date}T${a.time}`);
+    const bDate = new Date(`${b.date}T${b.time}`);
+    return aDate.getTime() - bDate.getTime();
+  });
+
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (!user) return;
+
     if (user.experience >= 300) {
       const newLevel = (user.level || 1) + 1;
       const newExp = user.experience - 300;
-      // Update in Supabase
+
+      const tableName = user.role === 'tutor' ? 'tutor_information' : 'student_information';
+
       supabase
-        .from('student_information')
+        .from(tableName)
         .update({ level: newLevel, experience: newExp })
         .eq('id', user.id)
         .then(({ error }) => {
@@ -110,102 +161,132 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
         });
     }
   }, [user?.experience]);
-  // Auto-level up: when experience reaches 300, increment level and update DB
-  useEffect(() => {
-    if (!user) return;
-    if (user.experience >= 300) {
-      const newLevel = (user.level || 1) + 1;
-      const newExp = user.experience - 300;
-      // Update in Supabase
-      supabase
-        .from('student_information')
-        .update({ level: newLevel, experience: newExp })
-        .eq('id', user.id)
-        .then(({ error }) => {
-          if (!error) {
-            setUser(prev => prev ? { ...prev, level: newLevel, experience: newExp } : prev);
-          }
-        });
-    }
-  }, [user?.experience]);
+
+  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const timesOfDay = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
   const [progress, setProgress] = useState<Progress | null>(null);
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null);
   const [currentFeature, setCurrentFeature] = useState('overview');
-
-  // Use TodosContext for shared state
+  const [availability, setAvailability] = useState<{ day: string; times: string[] }[]>([]);
+  const [selectedDay, setSelectedDay] = useState('');
+  const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
+  const [loadingProfile, setLoadingProfile] = useState(true);
   const { todos, toggleTodo, getTodaysTodos } = useTodosContext();
   const todaysTodos = getTodaysTodos();
 
-  // Define priority order
   const priorityOrder: Record<'high' | 'medium' | 'low', number> = {
     high: 0,
     medium: 1,
     low: 2
   };
 
-  // Define status order: Overdue first, then Today
   const statusOrder: Record<string, number> = {
     Overdue: 0,
     Today: 1,
   };
 
-  // Filter to only include Overdue + Today tasks, and sort
   const filteredTodos = todaysTodos
     .filter(todo => ['Today', 'Overdue'].includes(todo.status ?? ''))
     .sort((a, b) => {
       const aStatus = a.status ?? '';
       const bStatus = b.status ?? '';
-      // First by status (Overdue on top)
+
       if (statusOrder[aStatus] !== statusOrder[bStatus]) {
         return (statusOrder[aStatus] ?? 99) - (statusOrder[bStatus] ?? 99);
       }
-      // Then by priority within the same status
+
       return priorityOrder[a.priority] - priorityOrder[b.priority];
     });
 
-  // Fetch user profile and progress from Supabase KV store
+  const setTutorOnline = async (userId: string, online: boolean) => {
+    const { error } = await supabase
+      .from('tutor_information')
+      .update({ is_online: online })
+      .eq('id', userId);
+
+    if (error) console.error('Failed to update tutor online status:', error);
+  };
+
+  const fetchUserProfile = async () => {
+    setLoadingProfile(true);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error("Auth error:", authError);
+      setLoadingProfile(false);
+      return;
+    }
+
+    const userId = user.id;
+
+    const { data: tutor } = await supabase
+      .from("tutor_information")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (tutor) {
+      const mappedTutor = { ...mapToUserInterface(tutor), role: "tutor" };
+      setUser(mappedTutor);
+
+      setLoadingProfile(false);
+      return;
+    }
+
+    const { data: student } = await supabase
+      .from("student_information")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (student) {
+      setUser({ ...mapToUserInterface(student), role: "student" });
+      setLoadingProfile(false);
+      return;
+    }
+
+    console.warn("⚠️ No profile found for this user:", userId);
+    setLoadingProfile(false);
+  };
+
   useEffect(() => {
-    const fetchUserFromStudentInfo = async () => {
-      if (!accessToken) return;
-      try {
-        // Get user id from accessToken (assume JWT, decode or use supabase.auth.getUser())
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        if (authError || !authUser) {
-          console.error('Failed to get authenticated user:', authError);
-          return;
-        }
-        const { data, error } = await supabase
-          .from('student_information')
-          .select('*')
-          .eq('id', authUser.id)
-          .maybeSingle();
-        if (!error && data) {
-          setUser({
-            id: data.id,
-            first_name: data.first_name,
-            last_name: data.last_name,
-            email: data.email,
-            role: data.role,
-            credits: data.credits,
-            experience: data.experience,
-            level: data.level,
-            total_earnings: data.total_earnings ?? 0,
-            sessions_completed: data.sessions_completed ?? 0,
-            streak: data.streak,
-            weak_subjects: data.weak_subjects ?? [],
-            preferred_learning_style: data.preferred_learning_style ?? '',
-            last_active: data.last_active,
-            favorite_tutors: data.favorite_tutors ?? [],
-          });
-        }
-      } catch (err) {
-        console.error('Failed to fetch user from student_information:', err);
-      }
-    };
-    fetchUserFromStudentInfo();
+    fetchUserProfile();
   }, [accessToken]);
 
-  // Fetch daily quote when access token is available
+  const fetchSessions = async () => {
+    if (!user) return;
+
+    try {
+      const filterField = user.role === 'student' ? 'student_id' : 'tutor_id';
+
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select('*')
+        .eq(filterField, user.id);
+
+      if (error) {
+        console.error('Error fetching sessions:', error);
+        setUpcomingSessions([]);
+        return;
+      }
+
+      setUpcomingSessions(data || []);
+    } catch (err) {
+      console.error('Unexpected error fetching sessions:', err);
+      setUpcomingSessions([]);
+    }
+  };
+
+  useEffect(() => {
+    if (user) fetchSessions();
+  }, [user]);
+
+  useEffect(() => {
+    if (user?.role === 'tutor' && user.availability) {
+      setAvailability(user.availability);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (accessToken) {
       fetchDailyQuote();
@@ -213,7 +294,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   }, [accessToken]);
 
   const fetchDailyQuote = async () => {
-    // Don't try to fetch quote if we don't have an access token yet
     if (!accessToken) {
       console.log('Skipping quote fetch - no access token available yet');
       return;
@@ -234,7 +314,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
         setDailyQuote(data.quote);
       } else {
         console.log('Quote fetch failed with status:', response.status);
-        // Set a fallback quote if server is unavailable
         setDailyQuote({
           text: "The expert in anything was once a beginner.",
           author: "Helen Hayes"
@@ -242,7 +321,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       }
     } catch (error) {
       console.error('Error fetching daily quote:', error);
-      // Set a fallback quote on network error
       setDailyQuote({
         text: "Learning never exhausts the mind.",
         author: "Leonardo da Vinci"
@@ -250,14 +328,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
     }
   };
 
-  // Fetch latest credits from Supabase after update
   const handleCreditsUpdate = (newCredits: number) => {
     if (!user) return;
-    // Instantly update UI for responsiveness
+
     setUser(prev => (prev ? { ...prev, credits: newCredits } : prev));
-    // Then fetch latest credits from Supabase to ensure accuracy
+
+    const tableName = user.role === 'tutor' ? 'tutor_information' : 'student_information';
+
     supabase
-      .from('student_information')
+      .from(tableName)
       .select('credits')
       .eq('id', user.id)
       .maybeSingle()
@@ -272,29 +351,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
     toggleTodo(todoId);
   };
 
-  // Mock data for demonstration
-  const upcomingSessions = [
-    {
-      id: 1,
-      subject: "Mathematics",
-      tutor: "Sarah Johnson",
-      student: "Alex Chen",
-      time: "2:00 PM - 3:00 PM",
-      date: "Today",
-      type: "video",
-      cost: 10
-    },
-    {
-      id: 2,
-      subject: "Physics",
-      tutor: "Dr. Michael Brown",
-      student: "Emma Davis",
-      time: "4:00 PM - 5:00 PM",
-      date: "Tomorrow",
-      type: "video",
-      cost: 15
+  const handleAddAvailability = async () => {
+    if (!selectedDay || selectedTimes.length === 0 || !user) return;
+
+    const newSlot = { day: selectedDay, times: selectedTimes };
+    const updatedAvailability = [...availability, newSlot];
+
+    setAvailability(updatedAvailability);
+
+    const { error } = await supabase
+      .from('tutor_information')
+      .update({ availability: updatedAvailability })
+      .eq('id', user.id);
+
+    if (error) {
+      toast.error('Error saving availability.');
+    } else {
+      toast.success('Availability saved!');
     }
-  ];
+
+    setSelectedDay('');
+    setSelectedTimes([]);
+  };
+
+  const handleDeleteSlot = async (idx: number) => {
+    if (!user) return;
+    const updatedAvailability = availability.filter((_, i) => i !== idx);
+    setAvailability(updatedAvailability);
+
+    const { error } = await supabase
+      .from('tutor_information')
+      .update({ availability: updatedAvailability })
+      .eq('id', user.id);
+
+    if (error) {
+      toast.error('Failed to delete slot.');
+    } else {
+      toast.success('Slot deleted successfully!');
+    }
+  };
 
   const recentActivity = [
     {
@@ -326,6 +421,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
   const getRoleDisplay = (role: string) => {
     return role.charAt(0).toUpperCase() + role.slice(1);
+  };
+
+  const handleFeatureJump = (feature: string) => {
+    const featureRoutes: Record<string, string> = {
+      'ai-tutor': '/ai-tutor-assistant',
+      'credits': '/credits',
+      'leaderboard': '/leaderboard',
+      'personalized-test': '/personalized-test',
+      'todo-list': '/todo-list',
+      'tutor-sessions': '/tutor-sessions',
+      'calendar': '/calendar-timetable',
+      'past-papers': '/past-papers',
+      'profile': '/profile-settings',
+      // Add more as needed
+    };
+    if (featureRoutes[feature]) {
+      navigate(featureRoutes[feature]);
+    }
   };
 
   const renderFeatureContent = () => {
@@ -448,7 +561,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
               <Target className="h-8 w-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm text-muted-foreground">Streak</p>
-                <p className="text-2xl font-bold">{user ? user.streak : '-'} days</p>
+                <p className="text-2xl font-bold">{user ? user.streak : '-'}</p>
               </div>
             </div>
           </CardContent>
@@ -467,28 +580,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingSessions.map((session) => (
-                <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <p className="font-medium">{session.subject}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {user?.role === 'tutor' ? `with ${session.student}` : `with ${session.tutor}`}
-                    </p>
-                    <p className="text-sm text-muted-foreground">{session.date} • {session.time}</p>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <Badge variant="secondary" className="text-xs">
-                        {session.cost} credits
-                      </Badge>
+              {upcoming.length === 0 ? (
+                <div className="text-center text-muted-foreground">No upcoming sessions scheduled.</div>
+              ) : (
+                upcoming.map((session) => (
+                  <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div>
+                      <p className="font-medium">{session.subject}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {user?.role === 'tutor'
+                          ? `with ${session.student}`
+                          : `with ${session.tutor_first_name} ${session.tutor_last_name}`}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {session.date} • {session.time}
+                      </p>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <Badge variant="secondary" className="text-xs">
+                          {session.cost} credits
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Scheduled
                     </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    Scheduled
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
             <div className="mt-4 text-center text-sm text-muted-foreground">
-              No actions available in overview
+              <Button variant="outline" onClick={() => handleFeatureJump('tutor-sessions')}>
+                View All Sessions
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -586,6 +709,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       {user?.role === 'tutor' && (
         <TutorDocumentUpload userId={user.id} />
       )}
+
+      {/* Inline Availability - always visible for tutors */}
+      {user?.role === 'tutor' && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Set Your Availability</CardTitle>
+            <CardDescription>Manage your tutoring schedule</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Add New Slot */}
+            <div className="flex flex-col md:flex-row md:items-end gap-4">
+              <Select value={selectedDay} onValueChange={setSelectedDay}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Day" />
+                </SelectTrigger>
+                <SelectContent>
+                  {daysOfWeek.map(day => (
+                    <SelectItem key={day} value={day}>{day}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex flex-wrap gap-2">
+                {timesOfDay.map(time => (
+                  <Button
+                    key={time}
+                    size="sm"
+                    variant={selectedTimes.includes(time) ? 'default' : 'outline'}
+                    onClick={() =>
+                      setSelectedTimes(prev =>
+                        prev.includes(time)
+                          ? prev.filter(t => t !== time)
+                          : [...prev, time]
+                      )
+                    }
+                  >
+                    {time}
+                  </Button>
+                ))}
+              </div>
+
+              <Button onClick={handleAddAvailability}>Add Slot</Button>
+            </div>
+
+            {/* Display Current Availability */}
+            <div>
+              <h4 className="font-medium mb-2">Your Availability</h4>
+              {availability.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No slots added yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {availability.map((slot, idx) => (
+                    <div key={idx} className="flex items-center justify-between border p-2 rounded">
+                      <div>
+                        <b>{slot.day}:</b> {slot.times.join(", ")}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleDeleteSlot(idx)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Actions */}
       <Card>
         <CardHeader>
@@ -707,10 +902,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       </CardContent>
     </Card>
   );
-
-
-
-
 
   const renderProfileContent = () => (
     <div className="space-y-6">

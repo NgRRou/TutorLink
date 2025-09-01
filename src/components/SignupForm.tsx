@@ -19,10 +19,18 @@ interface SignupFormProps {
     role: string;
     documents?: File[];
     subjects?: string[];
-    qualifications?: string[];
+    qualification?: string;
   }) => void;
   onSwitchToLogin: () => void;
 }
+
+const qualificationOptions = [
+  { label: "Primary School", value: "Primary School", rate: 10 },
+  { label: "High School", value: "High School", rate: 15 },
+  { label: "Bachelor", value: "Bachelor", rate: 20 },
+  { label: "Master", value: "Master", rate: 25 },
+  { label: "PhD", value: "PhD", rate: 30 }
+];
 
 export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
   const [formData, setFormData] = useState({
@@ -33,7 +41,7 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
     confirmPassword: '',
     role: '',
     subjects: [] as string[],
-    qualifications: ''
+    qualification: '', // change to single select
   });
   const availableSubjects = [
     'Mathematics',
@@ -91,8 +99,8 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
       if (!formData.subjects || formData.subjects.length === 0) {
         newErrors.subjects = 'Please select at least one subject you can teach';
       }
-      if (!formData.qualifications || formData.qualifications.trim() === '') {
-        newErrors.qualifications = 'Please enter your qualifications';
+      if (formData.qualification === '') {
+        newErrors.qualification = 'Please select your highest qualification';
       }
     }
     setErrors(newErrors);
@@ -110,7 +118,7 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
         role: formData.role,
         documents: uploadedDocuments.length > 0 ? uploadedDocuments : undefined,
         subjects: formData.role === 'tutor' ? formData.subjects : undefined,
-        qualifications: formData.role === 'tutor' ? formData.qualifications.split(',').map(q => q.trim()).filter(Boolean) : undefined
+        qualification: formData.role === 'tutor' ? formData.qualification : undefined
       });
     }
   };
@@ -127,11 +135,11 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
       return newErrors;
     });
   };
-  const handleQualificationsChange = (value: string) => {
-    setFormData(prev => ({ ...prev, qualifications: value }));
+  const handleQualificationChange = (value: string) => {
+    setFormData(prev => ({ ...prev, qualification: value }));
     setErrors(prev => {
       const newErrors = { ...prev };
-      delete newErrors.qualifications;
+      delete newErrors.qualification;
       return newErrors;
     });
   };
@@ -404,15 +412,22 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
                 </div>
                 {/* Qualifications */}
                 <div className="space-y-2">
-                  <Label htmlFor="qualifications">Qualifications</Label>
-                  <Input
-                    id="qualifications"
-                    placeholder="e.g. BSc Mathematics, PGCE, etc. (comma separated)"
-                    value={formData.qualifications}
-                    onChange={e => handleQualificationsChange(e.target.value)}
-                  />
-                  {errors.qualifications && (
-                    <p className="text-sm text-destructive">{errors.qualifications}</p>
+                  <Label htmlFor="qualification">Highest Qualification</Label>
+                  <Select
+                    value={formData.qualification}
+                    onValueChange={handleQualificationChange}
+                  >
+                    <SelectTrigger className={errors.qualification ? "border-destructive" : ""}>
+                      <SelectValue placeholder="Select qualification" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {qualificationOptions.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.qualification && (
+                    <p className="text-sm text-destructive">{errors.qualification}</p>
                   )}
                 </div>
                 {/* Document Upload for Tutors */}
