@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
+import { useNavigate } from "react-router-dom";
 
 interface User {
   id: string;
@@ -48,11 +49,25 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
   const [isLoading, setIsLoading] = useState(false);
   const [dailyLoginClaimed, setDailyLoginClaimed] = useState(false);
   const [localCredits, setLocalCredits] = useState(user.credits);
+  const navigate = useNavigate();
 
-  // Keep localCredits in sync if user.credits changes from parent
   React.useEffect(() => {
-    setLocalCredits(user.credits);
-  }, [user.credits]);
+    async function checkClaimed() {
+      const { data, error } = await supabase
+        .from("student_information")
+        .select("last_claimed")
+        .eq("id", user.id)
+        .single();
+      if (!error && data?.last_claimed) {
+        const today = new Date().toISOString().split("T")[0];
+        const lastClaimed = data.last_claimed.split("T")[0];
+        setDailyLoginClaimed(today === lastClaimed);
+      } else {
+        setDailyLoginClaimed(false);
+      }
+    }
+    if (user?.id) checkClaimed();
+  }, [user?.id]);
 
   const creditPackages = [
     {
@@ -123,19 +138,16 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
     }
   ];
 
-  // Purchase function: update credits in both local state and Supabase
   const purchaseCredits = async (packageId: string) => {
     const packageData = creditPackages.find(pkg => pkg.id === packageId);
     if (!packageData) return;
 
     setIsLoading(true);
 
-    // Instantly update local credits for immediate UI feedback
     const newCredits = localCredits + packageData.credits;
     setLocalCredits(newCredits);
-    onCreditsUpdate(newCredits); // update parent immediately
+    onCreditsUpdate(newCredits); 
 
-    // Update credits in Supabase student_information table
     const { error } = await supabase
       .from('student_information')
       .update({ credits: newCredits })
@@ -147,7 +159,6 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
       return;
     }
 
-    // Fetch the latest credits from Supabase to ensure UI is in sync
     const { data, error: fetchError } = await supabase
       .from('student_information')
       .select('credits')
@@ -161,10 +172,34 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
     setIsLoading(false);
   };
 
-  const claimDailyLogin = () => {
-    onCreditsUpdate(user.credits + 5);
-    setDailyLoginClaimed(true);
-    toast.success('+5 credits earned from daily login bonus!');
+  const claimDailyLogin = async () => {
+    setIsLoading(true);
+    const today = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("student_information")
+      .select("credits")
+      .eq("id", user.id)
+      .single();
+
+    if (!error && data) {
+      const newCredits = (data.credits || 0) + 5;
+      const { error: updateError } = await supabase
+        .from("student_information")
+        .update({
+          credits: newCredits,
+          last_claimed: today
+        })
+        .eq("id", user.id);
+      if (!updateError) {
+        setLocalCredits(newCredits);
+        onCreditsUpdate(newCredits);
+        setDailyLoginClaimed(true);
+        toast.success("+5 credits earned from daily login bonus!");
+      } else {
+        toast.error("Failed to claim daily bonus.");
+      }
+    }
+    setIsLoading(false);
   };
 
   const navigateToTutorSessions = () => {
@@ -251,7 +286,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
             {creditPackages.map((pkg) => (
               <div
                 key={pkg.id}
-                className={`relative p-6 rounded-lg border-2 transition-all hover:shadow-lg ${pkg.popular ? 'border-purple-200 bg-purple-50' : 'border-gray-200'
+                className={`relative p-6 rounded-lg border-2 transition-all hover:shadow-lg flex flex-col h-full ${pkg.popular ? 'border-purple-200 bg-purple-50' : 'border-gray-200'
                   }`}
               >
                 {pkg.popular && (
@@ -274,7 +309,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
                   <p className="text-sm text-muted-foreground">{pkg.credits} credits</p>
                 </div>
 
-                <ul className="space-y-2 mb-6">
+                <ul className="space-y-2 mb-6 flex-1">
                   {pkg.features.map((feature, index) => (
                     <li key={index} className="flex items-center text-sm">
                       <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-2 flex-shrink-0"></div>
@@ -283,19 +318,20 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
                   ))}
                 </ul>
 
-                <Button
-                  className="w-full"
-                  variant={pkg.popular ? "default" : "outline"}
-                  onClick={() => purchaseCredits(pkg.id)}
-                  disabled={isLoading}
-                >
-                  {isLoading ? 'Processing...' : 'Purchase'}
-                </Button>
-
-                <div className="mt-2 text-center">
-                  <span className="text-xs text-muted-foreground">
-                    {(pkg.credits / 10).toFixed(1)} credits per RM
-                  </span>
+                <div className="mt-auto">
+                  <Button
+                    className="w-full"
+                    variant={pkg.popular ? "default" : "outline"}
+                    onClick={() => purchaseCredits(pkg.id)}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? 'Processing...' : 'Purchase'}
+                  </Button>
+                  <div className="mt-2 text-center">
+                    <span className="text-xs text-muted-foreground">
+                      {(pkg.credits / 10).toFixed(0)} credits / RM 1
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -314,6 +350,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Daily Login Bonus */}
             <div className="text-center p-4 bg-green-50 rounded-lg">
               <div className="flex items-center justify-center w-12 h-12 bg-green-100 rounded-full mx-auto mb-3">
                 <Calendar className="h-6 w-6 text-green-600" />
@@ -323,14 +360,14 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               <Button
                 size="sm"
                 variant="outline"
-                disabled={dailyLoginClaimed}
+                disabled={dailyLoginClaimed || isLoading}
                 onClick={claimDailyLogin}
-                className="opacity-50 cursor-not-allowed"
               >
-                {dailyLoginClaimed ? 'Already Claimed' : 'Claim Now'}
+                {dailyLoginClaimed ? 'Claimed' : isLoading ? 'Claiming...' : 'Claim Now'}
               </Button>
             </div>
 
+            {/* Help Other Students */}
             <div className="text-center p-4 bg-blue-50 rounded-lg">
               <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full mx-auto mb-3">
                 <Users className="h-6 w-6 text-blue-600" />
@@ -347,6 +384,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               </Button>
             </div>
 
+            {/* Top 10 Leaderboard */}
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <div className="flex items-center justify-center w-12 h-12 bg-purple-100 rounded-full mx-auto mb-3">
                 <Trophy className="h-6 w-6 text-purple-600" />
@@ -356,10 +394,9 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               <Button
                 size="sm"
                 variant="outline"
-                disabled={true}
-                className="opacity-50 cursor-not-allowed"
+                onClick={() => navigate("/leaderboard")}
               >
-                View Only
+                View Leaderboard
               </Button>
             </div>
           </div>

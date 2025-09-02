@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 interface User {
   id: string;
@@ -140,6 +140,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   });
 
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const pathToFeature: Record<string, string> = {
+    '/dashboard': 'overview',
+    '/ai-tutor-assistant': 'ai-tutor',
+    '/credits': 'credits',
+    '/leaderboard': 'leaderboard',
+    '/personalized-test': 'personalized-test',
+    '/todo-list': 'todo-list',
+    '/tutor-sessions': 'tutor-sessions',
+    '/calendar-timetable': 'calendar',
+    '/past-papers': 'past-papers',
+    '/profile-settings': 'profile'
+  };
+  const currentFeature = pathToFeature[location.pathname] || 'overview';
 
   useEffect(() => {
     if (!user) return;
@@ -166,7 +181,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
   const timesOfDay = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
   const [progress, setProgress] = useState<Progress | null>(null);
   const [dailyQuote, setDailyQuote] = useState<{ text: string; author: string } | null>(null);
-  const [currentFeature, setCurrentFeature] = useState('overview');
   const [availability, setAvailability] = useState<{ day: string; times: string[] }[]>([]);
   const [selectedDay, setSelectedDay] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
@@ -434,7 +448,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       'calendar': '/calendar-timetable',
       'past-papers': '/past-papers',
       'profile': '/profile-settings',
-      // Add more as needed
+      'overview': '/dashboard'
     };
     if (featureRoutes[feature]) {
       navigate(featureRoutes[feature]);
@@ -643,9 +657,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                 </div>
               ))}
             </div>
-            <div className="mt-4 text-center text-sm text-muted-foreground">
-              Activity history is view-only
-            </div>
           </CardContent>
         </Card>
 
@@ -697,7 +708,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <Button
               variant="outline"
               className="w-full mt-4"
-              onClick={() => setCurrentFeature('todo-list')}
+              onClick={() => navigate('/todo-list')}
             >
               View All Tasks
             </Button>
@@ -791,7 +802,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Button
               className="h-20 flex-col"
-              onClick={() => setCurrentFeature('ai-tutor')}
+              onClick={() => navigate('/ai-tutor-assistant')}
             >
               <Bot className="h-6 w-6 mb-2" />
               Ask AI Tutor
@@ -799,7 +810,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <Button
               variant="outline"
               className="h-20 flex-col"
-              onClick={() => setCurrentFeature('tutor-sessions')}
+              onClick={() => navigate('/tutor-sessions')}
             >
               <Calendar className="h-6 w-6 mb-2" />
               Schedule Session
@@ -807,7 +818,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <Button
               variant="outline"
               className="h-20 flex-col"
-              onClick={() => setCurrentFeature('personalized-test')}
+              onClick={() => navigate('/personalized-test')}
             >
               <FileText className="h-6 w-6 mb-2" />
               Take Test
@@ -815,7 +826,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <Button
               variant="outline"
               className="h-20 flex-col"
-              onClick={() => setCurrentFeature('credits')}
+              onClick={() => navigate('/credits')}
             >
               <Zap className="h-6 w-6 mb-2" />
               Buy Credits

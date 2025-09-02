@@ -6,8 +6,6 @@ import { Progress } from "./ui/progress";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Separator } from "./ui/separator";
 import { toast } from "sonner";
 import {
   Brain,
@@ -25,7 +23,8 @@ import {
   BarChart3,
   FileText,
   Timer,
-  Star
+  Star,
+  Settings
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
 import { supabase } from '../utils/supabase/client';
@@ -45,7 +44,6 @@ interface User {
 interface Question {
   id: string;
   subject: string;
-  topic: string;
   difficulty: 'easy' | 'medium' | 'hard';
   question: string;
   options?: string[];
@@ -53,9 +51,11 @@ interface Question {
   correctAnswer: string;
   explanation: string;
   points: number;
-  timeLimit: number; // in seconds
+  timeLimit: number; 
   basedOnMistake?: boolean;
   mistakePattern?: string;
+  rowId?: string;
+  raw?: any;
 }
 
 interface TestResult {
@@ -68,12 +68,11 @@ interface TestResult {
 
 interface LearningProgress {
   subject: string;
-  topic: string;
   correctAnswers: number;
   totalAttempts: number;
   averageTime: number;
   recentMistakes: string[];
-  difficultyLevel: number; // 1-5
+  difficultyLevel: number;
   lastPracticed: string;
 }
 
@@ -83,9 +82,9 @@ interface PersonalizedTestProps {
 }
 
 export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
-  const [testMode, setTestMode] = useState<'setup' | 'taking' | 'completed'>('setup');
+  const [testMode, setTestMode] = useState<'setup' | 'taking' | 'completed' | 'revision'>('setup');
   const [selectedSubject, setSelectedSubject] = useState('');
-  const [testType, setTestType] = useState<'adaptive' | 'weakness-focused' | 'comprehensive'>('adaptive');
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<{ [questionId: string]: string }>({});
@@ -96,42 +95,62 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
   const [learningProgress, setLearningProgress] = useState<LearningProgress[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Mock learning progress data based on user's weak subjects and past performance
   useEffect(() => {
-    const mockProgress: LearningProgress[] = [
-      {
-        subject: 'mathematics',
-        topic: 'calculus',
-        correctAnswers: 12,
-        totalAttempts: 20,
-        averageTime: 45,
-        recentMistakes: ['integration by parts', 'chain rule application', 'implicit differentiation'],
-        difficultyLevel: 3,
-        lastPracticed: '2024-01-14T10:30:00Z'
-      },
-      {
-        subject: 'physics',
-        topic: 'mechanics',
-        correctAnswers: 8,
-        totalAttempts: 15,
-        averageTime: 60,
-        recentMistakes: ['projectile motion', 'circular motion', 'work-energy theorem'],
-        difficultyLevel: 2,
-        lastPracticed: '2024-01-13T14:20:00Z'
-      },
-      {
-        subject: 'chemistry',
-        topic: 'organic chemistry',
-        correctAnswers: 15,
-        totalAttempts: 18,
-        averageTime: 38,
-        recentMistakes: ['stereochemistry', 'reaction mechanisms'],
-        difficultyLevel: 4,
-        lastPracticed: '2024-01-15T09:15:00Z'
+    async function fetchProgress() {
+      if (!user?.id) return;
+      setIsLoading(true);
+
+      const { data, error } = await supabase
+        .from('learning_progress')
+        .select('*')
+        .eq('user_id', user.id);
+
+      let normalized: LearningProgress[] = [];
+
+      if (!error && data) {
+        normalized = data.map((row: any) => ({
+          subject: row.subject,
+          correctAnswers: row.correct_answers || 0,
+          totalAttempts: row.total_questions || 0,
+          averageTime: row.average_time || 0,
+          recentMistakes: row.mistakes || [],
+          difficultyLevel: row.difficulty_level || 0,
+          lastPracticed: row.last_updated || ""
+        }));
       }
-    ];
-    setLearningProgress(mockProgress);
-  }, []);
+
+      const aggregated: Record<string, LearningProgress> = {};
+      normalized.forEach(p => {
+        if (!aggregated[p.subject]) {
+          aggregated[p.subject] = { ...p };
+        } else {
+          aggregated[p.subject].correctAnswers += p.correctAnswers;
+          aggregated[p.subject].totalAttempts += p.totalAttempts;
+          aggregated[p.subject].recentMistakes = [
+            ...aggregated[p.subject].recentMistakes,
+            ...p.recentMistakes
+          ];
+          if (p.lastPracticed > aggregated[p.subject].lastPracticed) {
+            aggregated[p.subject].lastPracticed = p.lastPracticed;
+          }
+        }
+      });
+
+      const merged = subjects.map(s => aggregated[s.value] || {
+        subject: s.value,
+        correctAnswers: 0,
+        totalAttempts: 0,
+        averageTime: 0,
+        recentMistakes: [],
+        difficultyLevel: 0,
+        lastPracticed: ""
+      });
+
+      setLearningProgress(merged);
+      setIsLoading(false);
+    }
+    fetchProgress();
+  }, [user?.id]);
 
   const subjects = [
     { value: 'mathematics', label: 'Mathematics', icon: '📐' },
@@ -142,134 +161,74 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     { value: 'english', label: 'English', icon: '📚' }
   ];
 
-  const testTypes = [
-    {
-      value: 'adaptive',
-      label: 'Adaptive Test',
-      description: 'Questions adapt to your skill level based on performance',
-      icon: Brain,
-      color: 'text-blue-600'
-    },
-    {
-      value: 'weakness-focused',
-      label: 'Weakness-Focused',
-      description: 'Target your weak areas and recent mistakes',
-      icon: Target,
-      color: 'text-red-600'
-    },
-    {
-      value: 'comprehensive',
-      label: 'Comprehensive Review',
-      description: 'Balanced mix covering all topics and difficulty levels',
-      icon: BookOpen,
-      color: 'text-green-600'
-    }
-  ];
-
-  // Generate personalized questions based on learning progress and mistakes
-  const generatePersonalizedQuestions = async (subject: string, type: string) => {
+  const generateQuestionsFromGemini = async (subject: string, difficulty: string) => {
     setIsLoading(true);
-
     try {
-      // Find relevant learning progress for the subject
-      const subjectProgress = learningProgress.filter(p => p.subject === subject);
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': import.meta.env.VITE_GEMINI_API_KEY
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Generate 10 multiple-choice questions for the subject "${subject}" at "${difficulty}" difficulty. Each question should be a JSON object with: question, options (array of 4), correctAnswer, explanation. Return ONLY a JSON array, no extra text or formatting.`
+            }]
+          }]
+        })
+      });
 
-      // Mock question generation based on learning progress
-      const mockQuestions: Question[] = [];
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-      if (type === 'weakness-focused') {
-        // Focus on topics with low accuracy or recent mistakes
-        const weakTopics = subjectProgress.filter(p => p.correctAnswers / p.totalAttempts < 0.7);
+      if (!rawText) throw new Error("No text returned from Gemini.");
 
-        weakTopics.forEach((progress, index) => {
-          progress.recentMistakes.forEach((mistake, mistakeIndex) => {
-            mockQuestions.push({
-              id: `${subject}_${index}_${mistakeIndex}`,
-              subject: subject,
-              topic: progress.topic,
-              difficulty: progress.difficultyLevel <= 2 ? 'easy' : progress.difficultyLevel <= 3 ? 'medium' : 'hard',
-              question: `Based on your recent mistake with "${mistake}", let's practice: What is the correct approach to ${mistake}?`,
-              options: [
-                `Option A - Standard approach to ${mistake}`,
-                `Option B - Alternative method for ${mistake}`,
-                `Option C - Common misconception about ${mistake}`,
-                `Option D - Advanced technique for ${mistake}`
-              ],
-              type: 'multiple-choice',
-              correctAnswer: 'Option A - Standard approach to ' + mistake,
-              explanation: `The correct approach to ${mistake} involves understanding the fundamental principles and applying them step by step.`,
-              points: 10,
-              timeLimit: 90,
-              basedOnMistake: true,
-              mistakePattern: mistake
-            });
-          });
-        });
-      } else if (type === 'adaptive') {
-        // Generate questions that adapt to user's current level
-        subjectProgress.forEach((progress, index) => {
-          const adaptiveDifficulty = progress.correctAnswers / progress.totalAttempts > 0.8 ? 'hard' :
-            progress.correctAnswers / progress.totalAttempts > 0.6 ? 'medium' : 'easy';
+      const match = rawText.match(/\[.*\]/s);
+      if (!match) throw new Error("No JSON array found in Gemini response.");
 
-          mockQuestions.push({
-            id: `${subject}_adaptive_${index}`,
-            subject: subject,
-            topic: progress.topic,
-            difficulty: adaptiveDifficulty,
-            question: `${progress.topic.charAt(0).toUpperCase() + progress.topic.slice(1)} question adapted to your skill level: Solve this ${adaptiveDifficulty} problem.`,
-            options: [
-              'Option A - Correct approach',
-              'Option B - Partially correct',
-              'Option C - Common error',
-              'Option D - Incorrect method'
-            ],
-            type: 'multiple-choice',
-            correctAnswer: 'Option A - Correct approach',
-            explanation: `This question was generated based on your current performance level in ${progress.topic}.`,
-            points: adaptiveDifficulty === 'hard' ? 15 : adaptiveDifficulty === 'medium' ? 10 : 5,
-            timeLimit: adaptiveDifficulty === 'hard' ? 120 : adaptiveDifficulty === 'medium' ? 90 : 60
-          });
-        });
-      } else {
-        // Comprehensive test with balanced coverage
-        const allTopics = ['algebra', 'calculus', 'geometry', 'statistics'];
-        const difficulties: ('easy' | 'medium' | 'hard')[] = ['easy', 'medium', 'hard'];
-
-        allTopics.forEach((topic, topicIndex) => {
-          difficulties.forEach((difficulty, diffIndex) => {
-            mockQuestions.push({
-              id: `${subject}_comprehensive_${topicIndex}_${diffIndex}`,
-              subject: subject,
-              topic: topic,
-              difficulty: difficulty,
-              question: `${topic.charAt(0).toUpperCase() + topic.slice(1)} ${difficulty} question: Demonstrate your understanding of ${topic} concepts.`,
-              options: [
-                `Option A - ${difficulty} level correct answer`,
-                `Option B - Incorrect but plausible`,
-                `Option C - Common student error`,
-                `Option D - Completely wrong`
-              ],
-              type: 'multiple-choice',
-              correctAnswer: `Option A - ${difficulty} level correct answer`,
-              explanation: `This ${difficulty} question tests your comprehensive understanding of ${topic}.`,
-              points: difficulty === 'hard' ? 15 : difficulty === 'medium' ? 10 : 5,
-              timeLimit: difficulty === 'hard' ? 120 : difficulty === 'medium' ? 90 : 60
-            });
-          });
-        });
+      let parsed: any[];
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        console.warn("Strict JSON parse failed, trying JSON5...");
+        const JSON5: any = (await import('json5')).default;
+        parsed = JSON5.parse(match[0]);
       }
 
-      // Limit to 10 questions and shuffle
-      const shuffledQuestions = mockQuestions.sort(() => Math.random() - 0.5).slice(0, 10);
-      setQuestions(shuffledQuestions);
+      const questions: Question[] = parsed.map((q: any, idx: number) => {
+        let correct = q.correctAnswer.trim();
 
-      const totalTime = shuffledQuestions.reduce((sum, q) => sum + q.timeLimit, 0);
+        if (/^[A-D]$/i.test(correct) && Array.isArray(q.options)) {
+          const letterIndex = correct.toUpperCase().charCodeAt(0) - 65; 
+          correct = q.options[letterIndex];
+        }
+
+        return {
+          id: `q_${idx}`,
+          subject,
+          difficulty: difficulty.toLowerCase() as any,
+          question: q.question,
+          options: q.options,
+          type: 'multiple-choice',
+          correctAnswer: correct,
+          explanation: q.explanation,
+          points: difficulty === 'hard' ? 15 : difficulty === 'medium' ? 10 : 5,
+          timeLimit: difficulty === 'hard' ? 120 : difficulty === 'medium' ? 90 : 60
+        };
+      });
+
+      setQuestions(questions);
+
+      const totalTime = questions.reduce((sum, q) => sum + q.timeLimit, 0);
       setTotalTestTime(totalTime);
       setTimeRemaining(totalTime);
 
     } catch (error) {
-      console.error('Error generating questions:', error);
-      toast.error('Failed to generate personalized test');
+      console.error("Error generating questions from Gemini:", error);
+      toast.error('Failed to generate questions. Check console for details.');
+      setQuestions([]);
+      setTestMode('setup');
     } finally {
       setIsLoading(false);
     }
@@ -281,11 +240,16 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
       return;
     }
 
-    await generatePersonalizedQuestions(selectedSubject, testType);
+    setCurrentQuestionIndex(0);
+    setAnswers({});
+    setTestResults([]);
+    setQuestions([]);
+    setTimeRemaining(0);
+    setTotalTestTime(0);
+    await generateQuestionsFromGemini(selectedSubject, difficulty);
     setTestMode('taking');
     setTestStartTime(Date.now());
 
-    // Start timer
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
@@ -306,7 +270,11 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
-      completeTest();
+      if (testMode === "revision") {
+        completeRevision();
+      } else {
+        completeTest();
+      }
     }
   };
 
@@ -319,7 +287,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
         questionId: question.id,
         userAnswer,
         isCorrect,
-        timeSpent: 0, // Would calculate actual time spent
+        timeSpent: 0, 
         pointsEarned
       };
     });
@@ -327,21 +295,17 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     setTestResults(results);
     setTestMode('completed');
 
-    // Update learning progress based on results
     updateLearningProgress(results);
 
-    // Award experience and credits to student
     const totalExp = results.reduce((sum, r) => sum + r.pointsEarned, 0);
     const creditsEarned = results.filter(r => r.isCorrect).length;
     if (user?.id) {
-      // Fetch current experience and credits from Supabase
       const { data: student, error: fetchError } = await supabase
         .from('student_information')
         .select('experience, credits')
         .eq('id', user.id)
         .maybeSingle();
       if (!fetchError && student) {
-        // Update student_information
         const { error } = await supabase
           .from('student_information')
           .update({
@@ -349,12 +313,10 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
             credits: (student.credits || 0) + creditsEarned
           })
           .eq('id', user.id);
-        // Update leaderboard experience (and optionally rank)
         await supabase
           .from('leaderboard')
           .update({
             experience: (student.experience || 0) + totalExp
-            // Optionally, update rank here if you have logic for it
           })
           .eq('student_id', user.id);
         if (!error) {
@@ -366,19 +328,107 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     toast.success('Test completed!');
   };
 
-  const updateLearningProgress = (results: TestResult[]) => {
-    // Mock update to learning progress based on test results
-    const newMistakes: string[] = [];
+  const completeRevision = async () => {
+    if (!user?.id) return;
 
-    results.forEach((result, index) => {
-      const question = questions[index];
-      if (!result.isCorrect) {
-        newMistakes.push(question.topic);
-      }
+    const results: TestResult[] = questions.map(q => {
+      const userAnswer = answers[q.id] || '';
+      const isCorrect = userAnswer.trim() === q.correctAnswer.trim();
+      return { questionId: q.id, userAnswer, isCorrect, timeSpent: 0, pointsEarned: isCorrect ? q.points : 0 };
     });
 
-    // This would normally update the backend
-    console.log('New mistakes to track:', newMistakes);
+    setTestResults(results);
+    setTestMode('completed');
+
+    for (const q of questions) {
+      if (!q.rowId) continue; 
+      const result = results.find(r => r.questionId === q.id);
+      if (!result?.isCorrect) continue; 
+
+      const { data: row, error } = await supabase
+        .from('learning_progress')
+        .select('*')
+        .eq('id', q.rowId)
+        .maybeSingle();
+
+      if (error || !row) continue;
+
+      const parsedMistakes = (row.mistakes || []).map((m: any) =>
+        typeof m === 'string' ? JSON.parse(m) : m
+      );
+
+      const updatedMistakes = parsedMistakes.filter(pm =>
+        !(pm.question === q.question && pm.correctAnswer === q.correctAnswer)
+      );
+
+      await supabase
+        .from('learning_progress')
+        .update({
+          mistakes: updatedMistakes.map(m => JSON.stringify(m)),
+          correct_answers: (row.correct_answers || 0) + 1, 
+          last_updated: new Date().toISOString()
+        })
+        .eq('id', q.rowId);
+    }
+
+    toast.success('Revision completed! Correct answers updated.');
+  };
+
+  const updateLearningProgress = async (results: TestResult[]) => {
+    const correct = results.filter(r => r.isCorrect).length;
+    const total = results.length;
+    const mistakes = results
+      .map((r, idx) => {
+        if (!r.isCorrect && questions[idx]) {
+          return JSON.stringify({
+            question: questions[idx].question,
+            options: questions[idx].options,
+            correctAnswer: questions[idx].correctAnswer,
+            explanation: questions[idx].explanation
+          });
+        }
+        return null;
+      })
+      .filter((q): q is string => !!q);
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('learning_progress')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('subject', selectedSubject)
+      .eq('difficulty', difficulty)
+      .maybeSingle();
+
+    if (fetchError) return;
+
+    let updatedRecord;
+    if (existing) {
+      updatedRecord = {
+        user_id: user.id,
+        subject: selectedSubject,
+        difficulty,
+        mistakes: [...existing.mistakes, ...mistakes],
+        last_updated: new Date().toISOString(),
+        correct_answers: existing.correct_answers + correct,
+        total_questions: existing.total_questions + total
+      };
+    } else {
+      updatedRecord = {
+        user_id: user.id,
+        subject: selectedSubject,
+        difficulty,
+        mistakes,
+        last_updated: new Date().toISOString(),
+        correct_answers: correct,
+        total_questions: total
+      };
+    }
+    
+    const { error } = await supabase
+      .from('learning_progress')
+      .upsert(updatedRecord, { onConflict: ['user_id', 'subject', 'difficulty'] });
+
+    if (error) console.error('Error updating learning progress:', error);
   };
 
   const formatTime = (seconds: number) => {
@@ -400,17 +450,100 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
 
     const weakTopics = questions
       .filter((q, index) => !testResults[index]?.isCorrect)
-      .map(q => q.topic)
-      .filter((topic, index, arr) => arr.indexOf(topic) === index);
+      .map(q => q.subject)
+      .filter((subject, index, arr) => arr.indexOf(subject) === index);
 
     return { accuracy, weakTopics };
+  };
+
+  const startRevisionFromMistakes = async () => {
+    if (!user?.id || !selectedSubject) {
+      toast.error('Select a subject first.');
+      return;
+    }
+
+    setIsLoading(true);
+    setCurrentQuestionIndex(0);
+    setAnswers({});
+    setTestResults([]);
+    setQuestions([]);
+    setTimeRemaining(0);
+    setTotalTestTime(0);
+
+    try {
+      const { data, error } = await supabase
+        .from('learning_progress')
+        .select('id, subject, difficulty, mistakes, correct_answers')
+        .eq('user_id', user.id)
+        .eq('subject', selectedSubject);
+
+      if (error || !data) {
+        toast.error('Failed to fetch mistakes.');
+        setIsLoading(false);
+        return;
+      }
+
+      const allMistakes: Question[] = [];
+      const rowMap: Record<string, any> = {}; 
+      data.forEach((row: any) => {
+        rowMap[row.id] = row;
+        if (!Array.isArray(row.mistakes)) return;
+
+        row.mistakes.forEach((m: any) => {
+          let parsed = typeof m === 'string' ? JSON.parse(m) : m;
+          if (!parsed?.question || !parsed?.correctAnswer) return;
+
+          allMistakes.push({
+            id: `mistake_${allMistakes.length}`,
+            subject: row.subject,
+            difficulty: row.difficulty,   
+            question: parsed.question,
+            options: parsed.options,
+            type: Array.isArray(parsed.options) && parsed.options.length > 0 ? "multiple-choice" : "short-answer",
+            correctAnswer: parsed.correctAnswer,
+            explanation: parsed.explanation,
+            points: 10,
+            timeLimit: 60,
+            basedOnMistake: true,
+            mistakePattern: parsed.question,
+            rowId: row.id,               
+            raw: parsed                  
+          });
+        });
+      });
+
+      if (allMistakes.length === 0) {
+        toast('No mistakes found for this subject.');
+        setIsLoading(false);
+        return;
+      }
+
+      const selectedMistakes: Question[] = [];
+      const maxQuestions = 10;
+      const copy = [...allMistakes];
+
+      while (selectedMistakes.length < maxQuestions && copy.length > 0) {
+        const idx = Math.floor(Math.random() * copy.length);
+        selectedMistakes.push(copy.splice(idx, 1)[0]);
+      }
+
+      setQuestions(selectedMistakes);
+      setTestMode('revision');
+      setTotalTestTime(selectedMistakes.length * 60);
+      setTimeRemaining(selectedMistakes.length * 60);
+    } catch (err) {
+      console.error('Error fetching revision mistakes:', err);
+      toast.error('Something went wrong.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (testMode === 'setup') {
     return (
       <div className="space-y-6">
         {/* Header */}
-        <Card>
+        <Card  className="w-96 p-4">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Brain className="h-6 w-6 text-purple-600" />
@@ -433,24 +566,31 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
           <CardContent>
             <div className="space-y-4">
               {learningProgress.map((progress) => (
-                <div key={`${progress.subject}_${progress.topic}`} className="p-4 border rounded-lg">
+                <div key={progress.subject} className="p-4 border rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2">
                       <span className="text-lg">
                         {subjects.find(s => s.value === progress.subject)?.icon}
                       </span>
                       <div>
-                        <h4 className="font-medium capitalize">{progress.topic}</h4>
-                        <p className="text-sm text-muted-foreground capitalize">{progress.subject}</p>
+                        <h4 className="font-medium capitalize">{progress.subject}</h4>
                       </div>
                     </div>
                     <Badge
                       variant="outline"
-                      className={progress.correctAnswers / progress.totalAttempts >= 0.8 ? 'border-green-500 text-green-700' :
-                        progress.correctAnswers / progress.totalAttempts >= 0.6 ? 'border-yellow-500 text-yellow-700' :
-                          'border-red-500 text-red-700'}
+                      className={
+                        progress.totalAttempts === 0
+                          ? "border-gray-300 text-gray-500"
+                          : progress.correctAnswers / progress.totalAttempts >= 0.8
+                          ? "border-green-500 text-green-700"
+                          : progress.correctAnswers / progress.totalAttempts >= 0.6
+                          ? "border-yellow-500 text-yellow-700"
+                          : "border-red-500 text-red-700"
+                      }
                     >
-                      {Math.round((progress.correctAnswers / progress.totalAttempts) * 100)}% accuracy
+                      {progress.totalAttempts === 0
+                        ? "Haven't tested yet"
+                        : `${Math.round((progress.correctAnswers / progress.totalAttempts) * 100)}% accuracy`}
                     </Badge>
                   </div>
 
@@ -461,20 +601,6 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
                     </div>
                     <Progress value={(progress.correctAnswers / progress.totalAttempts) * 100} className="h-2" />
                   </div>
-
-                  {progress.recentMistakes.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-sm text-muted-foreground mb-1">Recent mistakes:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {progress.recentMistakes.map((mistake) => (
-                          <Badge key={mistake} variant="outline" className="text-xs border-red-200 text-red-700">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            {mistake}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -485,7 +611,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
         <Card>
           <CardHeader>
             <CardTitle>Configure Your Test</CardTitle>
-            <CardDescription>Choose subject and test type based on your learning needs</CardDescription>
+            <CardDescription>Choose subject and difficulty based on your learning needs</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Subject Selection */}
@@ -508,29 +634,20 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
               </div>
             </div>
 
-            {/* Test Type Selection */}
+            {/* Difficulty Selection */}
             <div>
-              <Label className="text-base font-medium mb-3 block">Test Type</Label>
-              <div className="space-y-3">
-                {testTypes.map((type) => {
-                  const IconComponent = type.icon;
-                  return (
-                    <div
-                      key={type.value}
-                      className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${testType === type.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                        }`}
-                      onClick={() => setTestType(type.value as any)}
-                    >
-                      <div className="flex items-start space-x-3">
-                        <IconComponent className={`h-5 w-5 mt-1 ${type.color}`} />
-                        <div className="flex-1">
-                          <h4 className="font-medium">{type.label}</h4>
-                          <p className="text-sm text-muted-foreground mt-1">{type.description}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <Label className="text-base font-medium mb-3 block">Select Difficulty</Label>
+              <div className="flex gap-3">
+                {['easy', 'medium', 'hard'].map((diff) => (
+                  <Button
+                    key={diff}
+                    variant={difficulty === diff ? "default" : "outline"}
+                    onClick={() => setDifficulty(diff as 'easy' | 'medium' | 'hard')}
+                    className="flex-1"
+                  >
+                    {diff.charAt(0).toUpperCase() + diff.slice(1)}
+                  </Button>
+                ))}
               </div>
             </div>
 
@@ -552,6 +669,16 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
                 </>
               )}
             </Button>
+            <Button
+              onClick={startRevisionFromMistakes}
+              disabled={isLoading}
+              className="w-full"
+              size="lg"
+              variant="secondary"
+            >
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              Revise Mistakes
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -560,7 +687,16 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
 
   if (testMode === 'taking') {
     const currentQuestion = questions[currentQuestionIndex];
-    const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+    const progress = questions.length > 0 ? ((currentQuestionIndex + 1) / questions.length) * 100 : 0;
+
+    if (!currentQuestion) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64">
+          <div className="w-8 h-8 border-4 border-blue-300 border-t-transparent rounded-full animate-spin mb-4" />
+          <div className="text-lg text-muted-foreground">Loading question...</div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-6">
@@ -608,7 +744,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <BookOpen className="h-5 w-5 text-blue-600" />
-              <span className="capitalize">{currentQuestion.topic}</span>
+              <span className="capitalize">{currentQuestion.subject}</span>
             </CardTitle>
             <CardDescription>
               {currentQuestion.basedOnMistake && currentQuestion.mistakePattern &&
@@ -621,20 +757,28 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
               {currentQuestion.question}
             </div>
 
-            {currentQuestion.type === 'multiple-choice' && currentQuestion.options && (
+            {currentQuestion.type === 'multiple-choice' && currentQuestion.options?.length ? (
               <RadioGroup
                 value={answers[currentQuestion.id] || ''}
-                onValueChange={(value) => handleAnswerChange(currentQuestion.id, value)}
+                onValueChange={(val) => handleAnswerChange(currentQuestion.id, val)}
               >
-                {currentQuestion.options.map((option, index) => (
-                  <div key={index} className="flex items-center space-x-2 p-3 border rounded hover:bg-gray-50">
-                    <RadioGroupItem value={option} id={`option-${index}`} />
-                    <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
-                      {option}
+                {currentQuestion.options.map((opt, i) => (
+                  <div key={i} className="flex items-center space-x-2 p-3 border rounded hover:bg-gray-50">
+                    <RadioGroupItem value={opt} id={`rev-opt-${i}`} />
+                    <Label htmlFor={`rev-opt-${i}`} className="flex-1 cursor-pointer">
+                      {opt}
                     </Label>
                   </div>
                 ))}
               </RadioGroup>
+            ) : (
+              <div className="p-3 bg-yellow-50 border rounded">
+                <p className="text-sm text-yellow-700">
+                  Options weren’t saved for this mistake. {currentQuestion.correctAnswer
+                    ? <>Correct answer: <strong>{currentQuestion.correctAnswer}</strong></>
+                    : "No correct answer stored."}
+                </p>
+              </div>
             )}
 
             {currentQuestion.type === 'short-answer' && (
@@ -684,7 +828,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     return (
       <div className="space-y-6">
         {/* Results Header */}
-        <Card>
+        <Card className="w-96 p-4">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <CheckCircle className="h-6 w-6 text-green-600" />
@@ -741,69 +885,77 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
         </div>
 
         {/* Detailed Results */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Question-by-Question Analysis</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {questions.map((question, index) => {
-                const result = testResults[index];
-                // Defensive: skip if question or result is undefined
-                if (!question || !result) return null;
-                return (
-                  <div key={question.id} className="p-4 border rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="text-sm font-medium">Question {index + 1}</span>
-                          <Badge variant="outline" className="text-xs">{question.topic}</Badge>
-                          <Badge
-                            className={`text-xs ${question.difficulty === 'hard' ? 'bg-red-100 text-red-700' :
-                              question.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-green-100 text-green-700'
-                              }`}
-                          >
-                            {question.difficulty}
-                          </Badge>
-                          {question.basedOnMistake && (
-                            <Badge variant="outline" className="text-xs border-orange-500 text-orange-700">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Mistake-based
+        {(testMode === 'completed') && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Question-by-Question Analysis</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {questions?.map((question, index) => {
+                  const result = testResults[index];
+                  if (!question || !result) return null;
+                  return (
+                    <div key={question.id} className="p-4 border rounded-lg">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="text-sm font-medium">Question {index + 1}</span>
+                            <Badge
+                              className={`text-xs ${question.difficulty === 'hard' ? 'bg-red-100 text-red-700' :
+                                question.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-green-100 text-green-700'
+                                }`}
+                            >
+                              {question.difficulty}
                             </Badge>
-                          )}
+                            {question.basedOnMistake && (
+                              <Badge variant="outline" className="text-xs border-orange-500 text-orange-700">
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                Mistake-based
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm mb-2">{question.question}</p>
                         </div>
-                        <p className="text-sm mb-2">{question.question}</p>
+                        <div className="flex items-center space-x-2">
+                          {result?.isCorrect ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-600" />
+                          )}
+                          <span className="text-sm font-medium">
+                            {result?.pointsEarned || 0}/{question.points} pts
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        {result?.isCorrect ? (
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                        ) : (
-                          <XCircle className="h-5 w-5 text-red-600" />
-                        )}
-                        <span className="text-sm font-medium">
-                          {result?.pointsEarned || 0}/{question.points} pts
-                        </span>
-                      </div>
-                    </div>
 
-                    {!result?.isCorrect && (
-                      <div className="mt-3 p-3 bg-blue-50 rounded border-l-4 border-blue-500">
-                        <div className="flex items-start space-x-2">
-                          <Lightbulb className="h-4 w-4 text-blue-600 mt-0.5" />
-                          <div>
-                            <p className="text-sm font-medium text-blue-800 mb-1">Explanation:</p>
-                            <p className="text-sm text-blue-700">{question.explanation}</p>
+                      {result?.isCorrect && question.basedOnMistake && (
+                        <div className="mt-2">
+                          <Badge className="bg-green-100 text-green-700">
+                            Correct ✓ Removed from Revision Pool
+                          </Badge>
+                        </div>
+                      )}
+
+                      {!result?.isCorrect && (
+                        <div className="mt-3 p-3 bg-blue-50 rounded border-l-4 border-blue-500">
+                          <div className="flex items-start space-x-2">
+                            <Lightbulb className="h-4 w-4 text-blue-600 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-blue-800 mb-1">Explanation:</p>
+                              <p className="text-sm text-blue-700">{question.explanation}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Improvement Recommendations */}
         <Card>
@@ -848,11 +1000,11 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
                     {questions
                       .map((q, i) => (testResults[i]?.isCorrect ? q : null))
                       .filter((q): q is Question => !!q)
-                      .map(q => q.topic)
-                      .filter((topic, index, arr) => arr.indexOf(topic) === index)
+                      .map(q => q.subject)
+                      .filter((subject, index, arr) => arr.indexOf(subject) === index)
                       .slice(0, 3)
-                      .map(topic => (
-                        <li key={topic}>• Strong performance in {topic}</li>
+                      .map(subject => (
+                        <li key={subject}>• Strong performance in {subject}</li>
                       ))
                     }
                   </ul>
@@ -868,11 +1020,178 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
             <RotateCcw className="h-4 w-4 mr-2" />
             Take Another Test
           </Button>
-          <Button onClick={() => toast.info('Test results saved to your progress!')}>
-            <Award className="h-4 w-4 mr-2" />
-            Save Results
+        </div>
+      </div>
+    );
+  }
+
+  if (testMode === 'revision') {
+    if (questions.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64">
+          <AlertTriangle className="h-8 w-8 text-orange-500 mb-2" />
+          <div className="text-lg text-muted-foreground">No mistakes to revise!</div>
+          <Button onClick={() => setTestMode('setup')} variant="outline" className="mt-4">
+            Back to Test Setup
           </Button>
         </div>
+      );
+    }
+
+    const currentQuestion = questions[currentQuestionIndex];
+    const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+
+    return (
+      <div className="space-y-6">
+        {/* Revision Header */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <Badge variant="outline">
+                  Revision {currentQuestionIndex + 1} of {questions.length}
+                </Badge>
+                <Badge variant="outline" className="border-orange-500 text-orange-700">
+                  Mistake-based
+                </Badge>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <Timer className="h-4 w-4" />
+                  <span>{formatTime(timeRemaining)}</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <Star className="h-4 w-4" />
+                  <span>{currentQuestion.points} pts</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4">
+              <Progress value={progress} className="h-2" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Revision Question Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <AlertTriangle className="h-5 w-5 text-orange-600" />
+              <span>Revision</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="text-lg leading-relaxed">
+              {currentQuestion.question}
+            </div>
+            <RadioGroup
+              value={answers[currentQuestion.id] || ''}
+              onValueChange={(value) => handleAnswerChange(currentQuestion.id, value)}
+            >
+              {currentQuestion.options?.map((option, index) => (
+                <div key={index} className="flex items-center space-x-2 p-3 border rounded hover:bg-gray-50">
+                  <RadioGroupItem value={option} id={`option-${index}`} />
+                  <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
+                    {option}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+            <div className="flex justify-between items-center pt-4">
+              <div className="text-sm text-muted-foreground">
+                <Clock className="h-4 w-4 inline mr-1" />
+                Suggested time: {formatTime(currentQuestion.timeLimit)}
+              </div>
+              <div className="space-x-2">
+                {currentQuestionIndex > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentQuestionIndex(prev => prev - 1)}
+                  >
+                    Previous
+                  </Button>
+                )}
+                <Button
+                  onClick={async () => {
+                    const userAnswer = answers[currentQuestion.id] || "";
+                    const correctAnswer = currentQuestion.correctAnswer || "";
+
+                    const isCorrect = userAnswer === correctAnswer;
+
+                    setTestResults(prev => {
+                      const updated = [...prev];
+                      updated[currentQuestionIndex] = {
+                        questionId: currentQuestion.id,
+                        userAnswer,
+                        isCorrect,
+                        timeSpent: 0,
+                        pointsEarned: isCorrect ? currentQuestion.points : 0
+                      };
+                      return updated;
+                    });
+
+                    if (isCorrect && user?.id) {
+
+                      const { data: existingRows, error } = await supabase
+                        .from("learning_progress")
+                        .select("mistakes")
+                        .eq("user_id", user.id)
+                        .eq("subject", currentQuestion.subject)
+                        .eq("difficulty", currentQuestion.difficulty.toLowerCase())
+
+                      if (!error && existingRows?.length) {
+                        const existing = existingRows[0];
+
+                        const currentMistakeObj = {
+                          question: currentQuestion.question,
+                          options: currentQuestion.options,
+                          correctAnswer: currentQuestion.correctAnswer,
+                          explanation: currentQuestion.explanation
+                        };
+
+                        const updatedMistakes = (existing.mistakes || []).filter((m: any) => {
+                          let parsed: any = m;
+                          if (typeof m === "string") {
+                            try {
+                              parsed = JSON.parse(m);
+                            } catch {
+                              return true; 
+                            }
+                          }
+
+                          const isSame =
+                            parsed.question === currentMistakeObj.question &&
+                            parsed.correctAnswer === currentMistakeObj.correctAnswer;
+                          if (isSame) {
+                            console.log("Removing mistake:", parsed);
+                          }
+                          return !isSame;
+                        });
+
+                        await supabase
+                          .from("learning_progress")
+                          .update({ mistakes: updatedMistakes, last_updated: new Date().toISOString() })
+                          .eq("user_id", user.id)
+                          .eq("subject", currentQuestion.subject)
+                          .eq("difficulty", currentQuestion.difficulty.toLowerCase());
+                      }
+                    }
+
+                    if (currentQuestionIndex < questions.length - 1) {
+                      setCurrentQuestionIndex(prev => prev + 1);
+                    } else {
+                      setTestMode("completed");
+                      toast.success("Revision completed!")
+                    }
+                  }}
+                  disabled={!answers[currentQuestion.id]}
+                >
+                  {currentQuestionIndex === questions.length - 1 ? "Finish Revision" : "Next"}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

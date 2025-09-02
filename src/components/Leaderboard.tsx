@@ -92,6 +92,17 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
         const userEntry = entries.find(e => e.user_id === user.id);
         setUserRank(userEntry ? userEntry.rank : 0);
       }
+      // Fetch user's actual rank
+      const { data: allRanks, error: allRanksError } = await supabase
+        .from('leaderboard')
+        .select('student_id')
+        .order('experience', { ascending: false });
+
+      if (!allRanksError && allRanks) {
+        const actualRank = allRanks.findIndex((row: any) => row.student_id === user.id) + 1;
+        setUserRank(actualRank > 0 ? actualRank : 0);
+      }
+
       // Fetch user credits and experience from student_information
       const { data: student, error: studentError } = await supabase
         .from('student_information')
@@ -121,7 +132,12 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
       case 3:
         return <Trophy className="h-5 w-5 text-orange-500" />;
       default:
-        return <span className="font-medium text-muted-foreground">#{rank}</span>;
+        return (
+          <span className="inline-flex items-center space-x-1">
+            <Star className="h-5 w-5 text-blue-400" />
+            <span className="font-medium text-muted-foreground">#{rank}</span>
+          </span>
+        );
     }
   };
 

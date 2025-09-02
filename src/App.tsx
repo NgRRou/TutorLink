@@ -7,6 +7,7 @@ import { Dashboard } from "./components/Dashboard";
 import { PersonalizedTest } from "./components/PersonalizedTest";
 import { Leaderboard } from "./components/Leaderboard";
 import { TodoList } from "./components/TodoList";
+import  ProfileSettings  from "./components/ProfileSettings";
 import { TodosProvider } from "./hooks/TodosContext";
 import { PastYearPapers } from "./components/PastYearPapers";
 import { CalendarTimetable } from "./components/CalendarTimetable";
@@ -24,7 +25,6 @@ import { Toaster } from "./components/ui/sonner";
 import { supabase } from "./utils/supabase/client";
 import { TutorSessions } from "./components/TutorSessions";
 import { GoogleOAuthProvider } from "@react-oauth/google";
-import ProfileSettings from './components/ProfileSettings';
 
 const CLIENT_ID = "946439376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com";
 
@@ -46,6 +46,7 @@ interface User {
 
 function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, onLogout: () => void, accessToken: string, onCreditsUpdate: (credits: number) => void }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const pathToFeatureId: Record<string, string> = {
     '/dashboard': 'overview',
     '/ai-tutor-assistant': 'ai-tutor',
@@ -102,7 +103,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => { }}
+                onClick={() => navigate('/profile-settings')}
               >
                 <Settings className="h-4 w-4" />
               </Button>
@@ -393,6 +394,50 @@ function AppRoutes() {
     };
   }, [user?.id, user?.role]);
 
+  useEffect(() => {
+    const updateLoginStreak = async (userId: string) => {
+      try {
+        const today = new Date();
+        const todayStr = today.toISOString().split("T")[0];
+
+        const { data, error } = await supabase
+          .from("student_information")
+          .select("streak, last_login")
+          .eq("id", userId)
+          .single();
+
+        if (error || !data) return;
+
+        const lastLoginStr = data.last_login ? data.last_login.split("T")[0] : null;
+        let newStreak = data.streak || 0;
+
+        if (!lastLoginStr) {
+          newStreak = 1;
+        } else if (lastLoginStr === todayStr) {
+          return;
+        } else {
+          const yesterday = new Date(today);
+          yesterday.setDate(today.getDate() - 1);
+          const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+          newStreak = (lastLoginStr === yesterdayStr) ? newStreak + 1 : 1;
+        }
+
+        await supabase
+          .from("student_information")
+          .update({ streak: newStreak, last_login: today.toISOString() })
+          .eq("id", userId);
+
+      } catch (err) {
+        console.error("Error updating login streak:", err);
+      }
+    };
+
+    if (user?.id && user.role === "student") {
+      updateLoginStreak(user.id);
+    }
+  }, [user?.id, user?.role]);
+
   return (
     <>
       <Toaster />
@@ -427,6 +472,23 @@ function AppRoutes() {
                 <Route path="/calendar-timetable" element={<CalendarTimetable user={user!} />} />
                 <Route path="/peer-learning-groups" element={<PeerLearning user={user!} accessToken={accessToken} />} />
                 <Route path="/credits" element={<CreditsManager user={user!} accessToken={accessToken} onCreditsUpdate={handleCreditsUpdate} />} />
+                <Route
+                  path="/profile-settings"
+                  element={
+                    <ProfileSettings
+                      user={{
+                        id: user!.id,
+                        email: user!.email,
+                        firstName: user!.first_name,
+                        lastName: user!.last_name,
+                        role: user!.role,
+                        level: user!.level,
+                        streak: user!.streak,
+                        preferredLearningStyle: user!.preferred_learning_style
+                      }}
+                    />
+                  }
+                />
                 <Route path="/meeting/:sessionId" element={<Meeting user={user || {
                   id: '',
                   first_name: '',
