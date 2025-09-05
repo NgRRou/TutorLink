@@ -498,7 +498,7 @@ function AppRoutes() {
                   <Leaderboard
                     user={user!}
                     accessToken={accessToken}
-                    onCreditsUpdate={handleCreditsUpdate} // <-- add this prop
+                    onCreditsUpdate={handleCreditsUpdate}
                   />
                 } />
                 <Route path="/todo-list" element={<TodoList user={user!} />} />
@@ -523,21 +523,7 @@ function AppRoutes() {
                     />
                   }
                 />
-                <Route path="/meeting/:sessionId" element={<Meeting user={user || {
-                  id: '',
-                  first_name: '',
-                  last_name: '',
-                  email: '',
-                  credits: 0,
-                  role: '',
-                  experience: 0,
-                  level: 0,
-                  total_earnings: 0,
-                  streak: 0,
-                  sessions_completed: 0,
-                  weak_subjects: [],
-                  preferred_learning_style: ''
-                }} />} />
+                <Route path="/meeting" element={<Meeting user={user!} />} />
                 <Route path="/tutor-sessions" element={<TutorSessions user={user!} accessToken={accessToken} />} />
               </Route>
             ) : (

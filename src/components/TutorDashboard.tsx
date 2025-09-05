@@ -23,6 +23,7 @@ import {
     CheckCircle
 } from "lucide-react";
 import { supabase } from '../utils/supabase/client';
+import { useNavigate } from 'react-router-dom';
 
 interface Session {
     id: string;
@@ -38,6 +39,7 @@ interface Session {
     status: 'scheduled' | 'completed' | 'cancelled' | 'ongoing' | 'pending';
     type: 'instant' | 'booked';
     topic?: string;
+    is_finished?: boolean;
 }
 
 interface InstantRequest {
@@ -66,6 +68,7 @@ interface TutorDashboardProps {
 }
 
 export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDashboardProps) {
+    const navigate = useNavigate();
     const [selectedTab, setSelectedTab] = useState('overview');
     const [sessions, setSessions] = useState<Session[]>([]);
     const [instantRequests, setInstantRequests] = useState<InstantRequest[]>([]);
@@ -104,6 +107,7 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                         cost: s.credits_required,
                         status: s.status,
                         type: s.type,
+                        is_finished: s.is_finished ?? false,  // <-- Here
                     }))
                 );
             } else {
@@ -335,15 +339,41 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                                                 <span className="text-sm text-muted-foreground">{session.cost} credits</span>
                                             </div>
                                             <div>
-                                                {session.status === 'ongoing' && (
-                                                    <Button
-                                                        onClick={() => {/* logic to join session */ }}
-                                                        className="bg-blue-600 hover:bg-blue-700"
-                                                    >
-                                                        <Play className="h-4 w-4 mr-2" />
-                                                        Join Session
-                                                    </Button>
-                                                )}
+                                            {session.status === 'completed' || session.is_finished ? (
+                                                <Badge className="bg-gray-400 text-white">Finished</Badge>
+                                            ) : session.status === 'ongoing' ? (
+                                                <Button
+                                                onClick={async () => {
+                                                    if (session.id && !session.is_finished) {
+                                                    try {
+                                                        const { error } = await supabase
+                                                        .from('tutor_sessions')
+                                                        .update({ is_finished: true, status: 'completed' })
+                                                        .eq('id', session.id);
+
+                                                        if (error) {
+                                                        toast.error('Failed to finish session: ' + error.message);
+                                                        return;
+                                                        }
+
+                                                        setSessions(prev =>
+                                                        prev.map(s => s.id === session.id ? { ...s, is_finished: true, status: 'completed' } : s)
+                                                        );
+
+                                                        toast.success('Session joined successfully!');
+                                                    } catch (err: any) {
+                                                        toast.error('Unexpected error: ' + (err?.message || err));
+                                                    }
+                                                    }
+
+                                                    navigate('/meeting');
+                                                }}
+                                                className="bg-blue-600 hover:bg-blue-700"
+                                                >
+                                                <Play className="h-4 w-4 mr-2" />
+                                                Join Session
+                                                </Button>
+                                            ) : null}
                                             </div>
                                         </div>
                                     </CardContent>

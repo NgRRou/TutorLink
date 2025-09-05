@@ -51,6 +51,7 @@ import {
   Palette,
   Eraser
 } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
 
 interface User {
   id: string;
@@ -167,16 +168,19 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
       isScreenSharing: false,
       joinedAt: new Date().toISOString()
     },
-    {
-      id: '2',
-      name: sessionInfo?.tutor || 'Sarah Chen',
-      role: 'tutor',
-      email: 'sarah.chen@example.com',
-      isVideoOn: true,
-      isAudioOn: true,
-      isScreenSharing: false,
-      joinedAt: new Date().toISOString()
-    }
+    // Add mock student if user is tutor
+    ...(user.role === 'tutor'
+      ? [{
+        id: '2',
+        name: sessionInfo?.student || 'Mock Student',
+        role: 'student' as 'student',
+        email: 'student@example.com',
+        isVideoOn: true,
+        isAudioOn: true,
+        isScreenSharing: false,
+        joinedAt: new Date().toISOString()
+      }]
+      : [])
   ]);
 
   const [showChat, setShowChat] = useState(false);
@@ -291,10 +295,34 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
     setNewMessage('');
   };
 
-  const leaveMeeting = () => {
+  const [showEarnedCredits, setShowEarnedCredits] = useState(false);
+  const [earnedCredits, setEarnedCredits] = useState<number | null>(null);
+
+  const navigate = useNavigate();
+
+  const leaveMeeting = async () => {
+    if (user.role === 'tutor') {
+      let credits = sessionInfo?.cost;
+      if (!credits) {
+        const { data } = await supabase
+          .from('tutor_sessions')
+          .select('credits_required')
+          .eq('tutor_id', user.id)
+          .order('date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        credits = data?.credits_required || 0;
+      }
+      setEarnedCredits(credits || 0);
+      setShowEarnedCredits(true);
+      setTimeout(() => {
+        setShowEarnedCredits(false);
+        navigate('/tutor-sessions');
+      }, 2500);
+      return;
+    }
     toast.success('Thank you for joining! Please rate your tutor.');
-    // Redirect to tutor sessions page and show thank you/rating prompt
-    window.location.href = '/tutor-sessions?thankyou=1';
+    navigate('/tutor-sessions?thankyou=1');
   };
 
   // Whiteboard functions
@@ -361,7 +389,43 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
   };
 
   return (
-    <div className="h-screen bg-gray-900 flex flex-col">
+    <div
+      className="bg-gray-900 flex flex-col"
+      style={{
+        minHeight: '80vh',
+        height: '85vh',
+        maxHeight: '100vh',
+        overflow: 'hidden'
+      }}
+    >
+      {/* Show earned credits widget for tutor */}
+      {showEarnedCredits && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-gray-100 bg-opacity-50">
+          <Card className="w-[380px] flex flex-col items-center p-6 border border-green-200 shadow-2xl">
+            <div className="flex items-center justify-center w-14 h-14 bg-green-100 rounded-full mb-3">
+              <CheckCircle className="h-8 w-8 text-green-500" />
+            </div>
+            <h2 className="text-xl font-bold mb-2 text-green-700">Session Complete!</h2>
+            <p className="mb-4 text-base text-gray-700 text-center">
+              You earned{" "}
+              <span className="font-bold text-green-600">{earnedCredits}</span> credits
+              for this session.
+            </p>
+            <Button
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold"
+              disabled
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Credits Earned
+            </Button>
+            <div className="mt-3 text-gray-400 text-xs text-center">
+              Redirecting to your dashboard...
+            </div>
+          </Card>
+        </div>
+      )}
+
+
       {/* Show thank you/rating if redirected from meeting */}
       {window.location.search.includes('thankyou=1') && (
         <div className="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-black bg-opacity-60 z-50">
@@ -394,7 +458,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
         </div>
       )}
       {/* Meeting Header */}
-      <div className="bg-gray-800 border-b border-gray-700 p-4">
+      <div className="bg-gray-800 border-b border-gray-700 p-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
@@ -441,9 +505,9 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
         </div>
       </div>
 
-      <div className="flex-1 flex">
+      <div className="flex-1 flex min-h-0" style={{ minHeight: 0 }}>
         {/* Main Video Area */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-h-0" style={{ minHeight: 0 }}>
           {isScreenSharing ? (
             // Screen sharing view
             <div className="h-full bg-gray-800 flex items-center justify-center">
@@ -502,7 +566,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
 
           {/* Whiteboard Overlay */}
           {showWhiteboard && (
-            <div className="absolute inset-4 bg-white rounded-lg shadow-2xl border">
+            <div className="absolute inset-4 bg-white rounded-lg shadow-2xl border flex flex-col min-h-0">
               <div className="h-full flex flex-col">
                 {/* Whiteboard Toolbar */}
                 <div className="bg-gray-50 border-b p-3 flex items-center justify-between">
@@ -579,17 +643,21 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
                 </div>
 
                 {/* Canvas */}
-                <div className="flex-1 relative">
+                <div className="flex-1 relative min-h-0">
                   <canvas
                     ref={canvasRef}
                     width={800}
                     height={600}
                     className="w-full h-full cursor-crosshair"
+                    style={{
+                      display: isWhiteboardVisible ? 'block' : 'none',
+                      maxHeight: '100%',
+                      maxWidth: '100%'
+                    }}
                     onMouseDown={startDrawing}
                     onMouseMove={draw}
                     onMouseUp={stopDrawing}
                     onMouseLeave={stopDrawing}
-                    style={{ display: isWhiteboardVisible ? 'block' : 'none' }}
                   />
                   {!isWhiteboardVisible && (
                     <div className="flex items-center justify-center h-full text-gray-500">
@@ -649,7 +717,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
 
         {/* Chat Sidebar */}
         {showChat && (
-          <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col">
+          <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col min-h-0" style={{ minHeight: 0 }}>
             <div className="p-4 border-b border-gray-700">
               <h3 className="text-white font-medium">Chat</h3>
             </div>
@@ -687,7 +755,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
       </div>
 
       {/* Session Info Footer */}
-      <div className="bg-gray-800 border-t border-gray-700 p-3">
+      <div className="bg-gray-800 border-t border-gray-700 p-3 flex-shrink-0">
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center space-x-4">
             <span>Meeting ID: {meetingId}</span>

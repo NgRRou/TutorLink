@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { TutorDashboard } from './TutorDashboard';
 import { InstantHelpWidget } from './InstantHelpWidget';
+import { useNavigate } from 'react-router-dom';
 
 async function uploadVerificationDocument(file: File, tutorId: string, supabase: any) {
   const filePath = `${tutorId}/${Date.now()}_${file.name}`;
@@ -115,6 +116,7 @@ interface TutorSessionsProps {
 }
 
 export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
+  const navigate = useNavigate();
   // Check if the user is a tutor
   if (user.role === 'tutor') {
     return (
@@ -290,58 +292,57 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
   }, []);
 
   useEffect(() => {
-    const savedSessions = localStorage.getItem('tutorSessions');
-    if (savedSessions) {
-      setSessions(JSON.parse(savedSessions));
-    }
+    const fetchStudentSessions = async () => {
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select(`
+          *,
+          tutor_information:tutor_id (
+            tutor_first_name:first_name,
+            tutor_last_name:last_name
+          )
+        `)
+        .eq('student_id', user.id)
+        .neq('status', 'pending')
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
 
-    // Only add mock sessions if no saved sessions exist
-    if (!savedSessions) {
-      const mockSessions: Session[] = [
-        {
-          id: '1',
-          tutorId: '1',
-          tutorName: 'Sarah Johnson',
-          subject: 'Mathematics',
-          difficulty: 'Intermediate',
-          date: '2025-01-29',
-          time: '14:00',
-          duration: 60,
-          credits_required: 15,
-          status: 'scheduled',
-          type: 'booked'
-        },
-        {
-          id: '2',
-          tutorId: '2',
-          tutorName: 'Dr. Michael Brown',
-          subject: 'Physics',
-          difficulty: 'Advanced',
-          date: '2025-01-30',
-          time: '16:00',
-          duration: 60,
-          credits_required: 20,
-          status: 'scheduled',
-          type: 'booked'
-        }
-      ];
-      setSessions(mockSessions);
-      localStorage.setItem('tutorSessions', JSON.stringify(mockSessions));
-    }
+      if (!error && data) {
+        const mappedSessions = data.map((s: any) => ({
+          id: s.id?.toString() ?? Date.now().toString(),
+          tutorId: s.tutor_id,
+          tutorName: s.tutor_information
+            ? `${s.tutor_information.tutor_first_name ?? ''} ${s.tutor_information.tutor_last_name ?? ''}`.trim()
+            : `${s.tutor_first_name ?? ''} ${s.tutor_last_name ?? ''}`.trim(),
+          subject: s.subject,
+          difficulty: s.difficulty,
+          date: s.date,
+          time: s.time,
+          duration: s.duration,
+          credits_required: s.credits_required,
+          status: s.status,
+          type: s.type
+        }));
+        setSessions(mappedSessions);
+      } else {
+        setSessions([]);
+      }
+    };
+
+    fetchStudentSessions();
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("thankyou") === "1") {
       setShowThankYou(true);
       // Find the most recent completed or ongoing session
-      const savedSessions = localStorage.getItem('tutorSessions');
-      if (savedSessions) {
-        const sessionsArr: Session[] = JSON.parse(savedSessions);
-        // Find the last session that was completed or ongoing
-        const sorted = sessionsArr.slice().sort((a, b) => Number(b.id) - Number(a.id));
-        setLastSession(sorted[0] || null);
-      }
+      fetchStudentSessions().then(() => {
+        if (sessions.length > 0) {
+          const sorted = sessions.slice().sort((a, b) => Number(b.id) - Number(a.id));
+          setLastSession(sorted[0] || null);
+        }
+      });
     }
-  }, []);
+  }, [user.id]);
 
   const checkTimeConflict = (date: string, time: string) => {
     return studentTimetable.some(item =>
@@ -1192,102 +1193,143 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sessions.map((session) => {
-                // Determine if session is finished or not started based on date/time
-                const sessionStart = new Date(`${session.date}T${session.time}`);
-                const sessionEnd = new Date(sessionStart);
-                sessionEnd.setMinutes(sessionEnd.getMinutes() + (session.duration || 60));
+              {(() => {
+                // Sort: ongoing meetings first, then not started (future, closest first), then finished (past)
                 const now = new Date();
-                const isFinished = (session.status === 'ongoing' || session.status === 'scheduled') && now > sessionEnd;
-                const notStarted = now < sessionStart;
-                function enterMeeting(id: string) {
-                  // Find the session by id
-                  const session = sessions.find(s => s.id === id);
-                  if (!session) {
-                  toast.error('Session not found.');
-                  return;
-                  }
-                  // For demo: redirect to a meeting URL (could be a video call page)
-                  // In a real app, this would be a unique meeting link per session
-                  window.open(`/meeting/${id}`, '_blank', 'noopener');
-                }
+                const sorted = [...sessions].sort((a, b) => {
+                  const aStart = new Date(`${a.date}T${a.time}`);
+                  const aEnd = new Date(aStart);
+                  aEnd.setMinutes(aEnd.getMinutes() + (a.duration || 60));
+                  const bStart = new Date(`${b.date}T${b.time}`);
+                  const bEnd = new Date(bStart);
+                  bEnd.setMinutes(bEnd.getMinutes() + (b.duration || 60));
 
-                return (
-                  <Card key={session.id} className="hover:shadow-md transition-shadow border-blue-200">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-lg">{session.tutorName}</h3>
-                          <div className="text-sm text-muted-foreground">{session.subject} • {session.difficulty}</div>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <Badge
-                            variant={session.status === 'ongoing' && !isFinished && !notStarted ? 'default' : 'outline'}
-                            className={
-                              session.status === 'ongoing' && !isFinished && !notStarted ? 'bg-green-100 text-green-700' :
-                                session.status === 'scheduled' && !isFinished && !notStarted ? 'bg-blue-100 text-blue-700' :
-                                  isFinished ? 'bg-gray-200 text-gray-700' :
-                                    notStarted ? 'bg-yellow-100 text-yellow-700' :
-                                      session.status === 'completed' ? 'bg-gray-100 text-gray-700' :
-                                        'bg-red-100 text-red-700'
-                            }
-                          >
-                            {isFinished ? 'Finished' : notStarted ? 'Not Started' : session.status.charAt(0).toUpperCase() + session.status.slice(1)}
-                          </Badge>
-                          <div className="text-xs text-gray-400 mt-1">{session.date} {session.time}</div>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                            <span>{session.credits_required} credits</span>
+                  // Ongoing
+                  const aIsOngoing = a.status === 'ongoing' && now >= aStart && now <= aEnd;
+                  const bIsOngoing = b.status === 'ongoing' && now >= bStart && now <= bEnd;
+                  if (aIsOngoing && !bIsOngoing) return -1;
+                  if (!aIsOngoing && bIsOngoing) return 1;
+
+                  // Not started (future)
+                  const aNotStarted = now < aStart;
+                  const bNotStarted = now < bStart;
+                  if (aNotStarted && bNotStarted) {
+                    // Closest to now comes first
+                    return aStart.getTime() - bStart.getTime();
+                  }
+                  if (aNotStarted && !bNotStarted) return -1; // not started before finished
+                  if (!aNotStarted && bNotStarted) return 1;
+
+                  // Finished: scheduled/ongoing and now > end
+                  const aIsFinished = (a.status === 'ongoing' || a.status === 'scheduled') && now > aEnd;
+                  const bIsFinished = (b.status === 'ongoing' || b.status === 'scheduled') && now > bEnd;
+                  if (aIsFinished && !bIsFinished) return 1;
+                  if (!aIsFinished && bIsFinished) return -1;
+
+                  // fallback: most recent first
+                  return bStart.getTime() - aStart.getTime();
+                });
+
+                return sorted.map((session) => {
+                  // Determine if session is finished or not started based on date/time
+                  const sessionStart = new Date(`${session.date}T${session.time}`);
+                  const sessionEnd = new Date(sessionStart);
+                  sessionEnd.setMinutes(sessionEnd.getMinutes() + (session.duration || 60));
+                  const now = new Date();
+                  const isFinished = (session.status === 'ongoing' || session.status === 'scheduled') && now > sessionEnd;
+                  const notStarted = now < sessionStart;
+                  function enterMeeting(id: string) {
+                    // Find the session by id
+                    const session = sessions.find(s => s.id === id);
+                    if (!session) {
+                      toast.error('Session not found.');
+                      return;
+                    }
+                    // For demo: redirect to a meeting URL (could be a video call page)
+                    // In a real app, this would be a unique meeting link per session
+                    window.open(`/meeting/${id}`, '_blank', 'noopener');
+                  }
+
+                  return (
+                    <Card key={session.id} className="hover:shadow-md transition-shadow border-blue-200">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-lg">{session.tutorName}</h3>
+                            <div className="text-sm text-muted-foreground">{session.subject} • {session.difficulty}</div>
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <Badge
+                              variant={session.status === 'ongoing' && !isFinished && !notStarted ? 'default' : 'outline'}
+                              className={
+                                session.status === 'ongoing' && !isFinished && !notStarted ? 'bg-green-100 text-green-700' :
+                                  session.status === 'scheduled' && !isFinished && !notStarted ? 'bg-blue-100 text-blue-700' :
+                                    isFinished ? 'bg-gray-200 text-gray-700' :
+                                      notStarted ? 'bg-yellow-100 text-yellow-700' :
+                                        session.status === 'completed' ? 'bg-gray-100 text-gray-700' :
+                                          'bg-red-100 text-red-700'
+                              }
+                            >
+                              {isFinished ? 'Finished' : notStarted ? 'Not Started' : session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                            </Badge>
+                            <div className="text-xs text-gray-400 mt-1">{session.date} {session.time}</div>
                           </div>
                         </div>
-                        <div className="flex space-x-2">
-                          {session.status === 'scheduled' && !isFinished && !notStarted && (
-                            <Button
-                              onClick={() => enterMeeting(session.id)}
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <Play className="h-4 w-4 mr-2" />
-                              Enter Meeting
-                            </Button>
-                          )}
-                          {session.status === 'ongoing' && !isFinished && !notStarted && (
-                            <Button
-                              onClick={() => enterMeeting(session.id)}
-                              className="bg-blue-600 hover:bg-blue-700"
-                            >
-                              <Video className="h-4 w-4 mr-2" />
-                              Rejoin Meeting
-                            </Button>
-                          )}
-                          {notStarted && (
-                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
-                              <Clock className="h-3 w-3 mr-1" />
-                              Meeting hasn't started
-                            </Badge>
-                          )}
-                          {isFinished && (
-                            <Badge variant="secondary" className="bg-gray-200 text-gray-700">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Finished
-                            </Badge>
-                          )}
-                          {session.status === 'completed' && (
-                            <Badge variant="secondary" className="bg-green-100 text-green-700">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Completed
-                            </Badge>
-                          )}
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                              <span>{session.credits_required} credits</span>
+                            </div>
+                          </div>
+                          <div className="flex space-x-2">
+                            {session.status === 'scheduled' && !isFinished && !notStarted && (
+                              <Button
+                                onClick={() => enterMeeting(session.id)}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                <Play className="h-4 w-4 mr-2" />
+                                Enter Meeting
+                              </Button>
+                            )}
+                            {session.status === 'ongoing' && !isFinished && !notStarted && (
+                              <Button
+                                onClick={() => {
+                                  // Use client-side navigation to preserve auth/session context
+                                  navigate('/meeting');
+                                }}
+                                className="bg-blue-600 hover:bg-blue-700"
+                              >
+                                <Video className="h-4 w-4 mr-2" />
+                                Join Meeting
+                              </Button>
+                            )}
+                            {notStarted && (
+                              <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+                                <Clock className="h-3 w-3 mr-1" />
+                                Meeting hasn't started
+                              </Badge>
+                            )}
+                            {isFinished && (
+                              <Badge variant="secondary" className="bg-gray-200 text-gray-700">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Finished
+                              </Badge>
+                            )}
+                            {session.status === 'completed' && (
+                              <Badge variant="secondary" className="bg-green-100 text-green-700">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Completed
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                      </CardContent>
+                    </Card>
+                  );
+                });
+              })()}
             </div>
           )}
         </TabsContent>
