@@ -146,7 +146,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
 
     const newCredits = localCredits + packageData.credits;
     setLocalCredits(newCredits);
-    onCreditsUpdate(newCredits); 
+    onCreditsUpdate(newCredits);
 
     const { error } = await supabase
       .from('student_information')
@@ -377,10 +377,9 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               <Button
                 size="sm"
                 variant="outline"
-                disabled={true}
-                className="opacity-50 cursor-not-allowed"
+                onClick={() => toast.info("Please log out and sign up as a tutor to help other students!")}
               >
-                Feature Disabled
+                Help Now
               </Button>
             </div>
 

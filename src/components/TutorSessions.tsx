@@ -27,6 +27,8 @@ import {
   CheckCircle,
   Play
 } from "lucide-react";
+import { TutorDashboard } from './TutorDashboard';
+import { InstantHelpWidget } from './InstantHelpWidget';
 
 async function uploadVerificationDocument(file: File, tutorId: string, supabase: any) {
   const filePath = `${tutorId}/${Date.now()}_${file.name}`;
@@ -52,6 +54,7 @@ async function fetchSessions(studentId: string) {
     .from('tutor_sessions')
     .select('*')
     .eq('student_id', studentId)
+    .neq('status', 'pending')            // { changed code }
     .order('date', { ascending: false })
     .order('time', { ascending: false });
 
@@ -72,7 +75,6 @@ interface Tutor {
   rating: number;
   totalSessions: number;
   subjects: string[];
-  hourlyRate: number;
   availability: {
     day: string;
     times: string[];
@@ -81,7 +83,7 @@ interface Tutor {
   isOnline: boolean;
   qualifications: string;
   verified_document?: string;
-  credits_earned?: number;
+  credits_earned: number; // Use this instead of hourlyRate
 }
 
 interface Session {
@@ -93,7 +95,7 @@ interface Session {
   date: string;
   time: string;
   duration: number;
-  cost: number;
+  credits_required: number; // Replace cost with credits_required
   status: 'scheduled' | 'completed' | 'cancelled' | 'ongoing';
   type: 'instant' | 'booked';
 }
@@ -102,6 +104,7 @@ interface User {
   id: string;
   first_name: string;
   last_name: string;
+  email: string;
   credits: number;
   role: string;
 }
@@ -112,6 +115,21 @@ interface TutorSessionsProps {
 }
 
 export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
+  // Check if the user is a tutor
+  if (user.role === 'tutor') {
+    return (
+      <TutorDashboard
+        user={{
+          id: user.id,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          credits: user.credits,
+          role: user.role,
+        }}
+        accessToken={accessToken}
+      />
+    );
+  }
 
   // Thank you dialog state
   const [showThankYou, setShowThankYou] = useState(false);
@@ -126,10 +144,14 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [studentTimetable, setStudentTimetable] = useState<any[]>([]);
   const [conflictCheck, setConflictCheck] = useState<{ [key: string]: boolean }>({});
+  // Track selected subject for each tutor
+  const [selectedTutorSubjects, setSelectedTutorSubjects] = useState<{ [tutorId: string]: string }>({});
   // Booking confirmation state
   const [showBookingConfirm, setShowBookingConfirm] = useState(false);
   const [lastBooked, setLastBooked] = useState<{ tutorId: string; day: string; time: string } | null>(null);
   const openDialogButtonRef = useRef<HTMLButtonElement>(null);
+  // State for Instant Help Widget
+  const [showInstantHelpWidget, setShowInstantHelpWidget] = useState(false);
   // Now tutors is defined, so demoTutorId can be set
   demoTutorId = tutors[0]?.id;
 
@@ -254,7 +276,6 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
           totalSessions: t.total_sessions || 0,
           credits_earned: t.credits_earned || 0,
           subjects: t.subjects || ['General'],
-          hourlyRate: t.hourly_rate || 10,
           availability: t.availability,
           isFavorite: t.is_favorite || false,
           isOnline: t.is_online || false,
@@ -286,7 +307,7 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
           date: '2025-01-29',
           time: '14:00',
           duration: 60,
-          cost: 15,
+          credits_required: 15,
           status: 'scheduled',
           type: 'booked'
         },
@@ -299,7 +320,7 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
           date: '2025-01-30',
           time: '16:00',
           duration: 60,
-          cost: 20,
+          credits_required: 20,
           status: 'scheduled',
           type: 'booked'
         }
@@ -329,81 +350,81 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
   };
 
   // Helper to update credits for student and tutor
-async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: number) {
-  try {
-    // 1️⃣ Update student credits
-    const { data: studentData, error: studentFetchError } = await supabase
-      .from('student_information')
-      .select('credits')
-      .eq('id', studentId)
-      .single();
+  async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: number) {
+    try {
+      // 1️⃣ Update student credits
+      const { data: studentData, error: studentFetchError } = await supabase
+        .from('student_information')
+        .select('credits')
+        .eq('id', studentId)
+        .single();
 
-    if (studentFetchError || !studentData) {
-      toast.error("Failed to fetch student credits: " + studentFetchError?.message);
-      return;
-    }
+      if (studentFetchError || !studentData) {
+        toast.error("Failed to fetch student credits: " + studentFetchError?.message);
+        return;
+      }
 
-    const { error: studentUpdateError } = await supabase
-      .from('student_information')
-      .update({ credits: studentData.credits - cost })
-      .eq('id', studentId);
+      const { error: studentUpdateError } = await supabase
+        .from('student_information')
+        .update({ credits: studentData.credits - cost })
+        .eq('id', studentId);
 
-    if (studentUpdateError) {
-      toast.error("Failed to update student credits: " + studentUpdateError.message);
-      return;
-    }
+      if (studentUpdateError) {
+        toast.error("Failed to update student credits: " + studentUpdateError.message);
+        return;
+      }
 
-    // 2️⃣ Fetch current tutor info first
-    const { data: tutorData, error: tutorFetchError } = await supabase
-      .from('tutor_information')
-      .select('credits_earned, total_sessions')
-      .eq('id', tutorId)
-      .single();
+      // 2️⃣ Fetch current tutor info first
+      const { data: tutorData, error: tutorFetchError } = await supabase
+        .from('tutor_information')
+        .select('credits_earned, total_sessions')
+        .eq('id', tutorId)
+        .single();
 
-    if (tutorFetchError || !tutorData) {
-      toast.error("Failed to fetch tutor info: " + tutorFetchError?.message);
-      return;
-    }
+      if (tutorFetchError || !tutorData) {
+        toast.error("Failed to fetch tutor info: " + tutorFetchError?.message);
+        return;
+      }
 
-    // 3️⃣ Update tutor credits and total sessions
-    const { data: updatedTutor, error: tutorUpdateError } = await supabase
-      .from('tutor_information')
-      .update({
-        credits_earned: (tutorData.credits_earned || 0) + cost,
-        total_sessions: (tutorData.total_sessions || 0) + 1
-      })
-      .eq('id', tutorId)
-      .select('*');
+      // 3️⃣ Update tutor credits and total sessions
+      const { data: updatedTutor, error: tutorUpdateError } = await supabase
+        .from('tutor_information')
+        .update({
+          credits_earned: (tutorData.credits_earned || 0) + cost,
+          total_sessions: (tutorData.total_sessions || 0) + 1
+        })
+        .eq('id', tutorId)
+        .select('*');
 
-    if (tutorUpdateError) {
-      toast.error("Failed to update tutor info: " + tutorUpdateError.message);
-      return;
-    }
+      if (tutorUpdateError) {
+        toast.error("Failed to update tutor info: " + tutorUpdateError.message);
+        return;
+      }
 
-    if (!updatedTutor) {
-      console.error('No tutor returned from update', tutorId);
-      toast.error("Failed to update tutor info: no row returned");
-      return;
-    }
+      if (!updatedTutor) {
+        console.error('No tutor returned from update', tutorId);
+        toast.error("Failed to update tutor info: no row returned");
+        return;
+      }
 
-    // 4️⃣ Update local state safely
-    setTutors(prev =>
-      prev.map(t =>
-        t.id === tutorId
-          ? {
+      // 4️⃣ Update local state safely
+      setTutors(prev =>
+        prev.map(t =>
+          t.id === tutorId
+            ? {
               ...t,
               credits_earned: updatedTutor[0]?.credits_earned ?? 0,
               totalSessions: updatedTutor[0]?.total_sessions ?? 0,
             }
-          : t
-      )
-    );
+            : t
+        )
+      );
 
-    toast.success("Credits and session count updated!");
-  } catch (err: any) {
-    toast.error("Error updating credits/sessions: " + err.message);
+      toast.success("Credits and session count updated!");
+    } catch (err: any) {
+      toast.error("Error updating credits/sessions: " + err.message);
+    }
   }
-}
 
   const FAVORITES_KEY = user?.id ? `favoriteTutors_${user.id}` : 'favoriteTutors';
 
@@ -449,6 +470,32 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
     toast.success('Favorites updated!');
   };
 
+  // Helper to get booked slots for tutors
+  const [bookedSlots, setBookedSlots] = useState<{ [tutorId: string]: { [date: string]: string[] } }>({});
+
+  useEffect(() => {
+    async function fetchBookedSlots() {
+      const { data, error } = await supabase
+        .from('tutor_sessions')
+        .select('tutor_id, date, time');
+      if (error || !data) return;
+
+      const slotMap: { [tutorId: string]: { [date: string]: string[] } } = {};
+
+      data.forEach((row: any) => {
+        const dateKey = row.date.split('T')[0];
+        const timeKey = row.time.slice(0, 5);
+
+        if (!slotMap[row.tutor_id]) slotMap[row.tutor_id] = {};
+        if (!slotMap[row.tutor_id][dateKey]) slotMap[row.tutor_id][dateKey] = [];
+        slotMap[row.tutor_id][dateKey].push(timeKey);
+      });
+
+      setBookedSlots(slotMap);
+    }
+    if (tutors.length > 0) fetchBookedSlots();
+  }, [tutors]);
+
   // Book session and update credits
   const bookSession = async (tutorId: string, date: string, time: string) => {
     const tutor = tutors.find(t => t.id === tutorId);
@@ -471,7 +518,7 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
       return;
     }
 
-    if (user.credits < tutor.hourlyRate) {
+    if (user.credits < tutor.credits_earned) {
       toast.error('Insufficient credits. Please purchase more credits.');
       return;
     }
@@ -487,7 +534,7 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
       date: sessionDateObj.toISOString().split('T')[0], // store as string "YYYY-MM-DD"
       time: time,
       duration: 60,
-      cost: tutor.hourlyRate,
+      credits_required: tutor.credits_earned, // Replace cost with credits_required
       status: 'scheduled',
       type: 'booked'
     };
@@ -505,12 +552,12 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
           date: newSession.date, // <-- correct date string
           time: newSession.time,
           duration: newSession.duration,
-          cost: newSession.cost,
+          credits_required: newSession.credits_required, // Replace cost with credits_required
           status: newSession.status,
           type: newSession.type
         }
       ]);
-      await updateCreditsOnBooking(user.id, tutor.id, tutor.hourlyRate);
+      await updateCreditsOnBooking(user.id, tutor.id, tutor.credits_earned);
       toast.success(`Session booked with ${tutor.name} for ${newSession.date} at ${time}!`);
       setLastBooked({ tutorId, day: newSession.date, time });
       setShowBookingConfirm(true);
@@ -519,6 +566,7 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
         .from('tutor_sessions')
         .select('*')
         .eq('student_id', user.id)
+        .neq('status', 'pending')        // { changed code }
         .order('date', { ascending: false })
         .order('time', { ascending: false });
       if (!error && data) {
@@ -531,7 +579,7 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
           date: s.date,
           time: s.time,
           duration: s.duration,
-          cost: s.cost,
+          credits_required: s.credits_required, // Replace cost with credits_required
           status: s.status,
           type: s.type
         }));
@@ -544,348 +592,310 @@ async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: 
   };
 
   const startInstantSession = async () => {
-  // Fetch online tutors from Supabase (real tutors)
-  const { data: onlineTutors, error } = await supabase
-    .from('tutor_information')
-    .select('*')
-    .eq('is_online', true);
+    try {
+      // Fetch online tutors from Supabase (real tutors)
+      const { data: onlineTutors, error: fetchError } = await supabase
+        .from('tutor_information')
+        .select('*')
+        .eq('is_online', true);
 
-  if (error || !onlineTutors || onlineTutors.length === 0) {
-    toast.error('No tutors available for instant sessions right now.');
-    return;
-  }
-
-  // Randomly pick a tutor
-  const randomTutor = onlineTutors[Math.floor(Math.random() * onlineTutors.length)];
-
-  if (user.credits < randomTutor.hourly_rate) {
-    toast.error('Insufficient credits for instant session.');
-    return;
-  }
-
-  const now = new Date();
-const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  const newSession: Session = {
-    id: Date.now().toString(),
-    tutorId: randomTutor.id,
-    tutorName: `${randomTutor.first_name} ${randomTutor.last_name}`,
-    subject: selectedSubject !== 'all' ? selectedSubject : randomTutor.subjects?.[0] || 'General',
-    difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',
-    date: localDate,
-    time: localTime,
-    duration: 60,
-    cost: randomTutor.hourly_rate,
-    status: 'ongoing',
-    type: 'instant'
-  };
-
-  // Save to sessions state
-  const updatedSessions = [...sessions, newSession];
-  setSessions(updatedSessions);
-  localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
-
-  // Save to Supabase tutor_sessions table
-  try {
-    const { error: insertError } = await supabase.from('tutor_sessions').insert([
-      {
-        tutor_id: randomTutor.id,
-        tutor_first_name: randomTutor.first_name,
-        tutor_last_name: randomTutor.last_name,
-        student_id: user.id,
-        subject: newSession.subject,
-        difficulty: newSession.difficulty,
-        date: newSession.date,
-        time: newSession.time,
-        duration: newSession.duration,
-        cost: newSession.cost,
-        status: newSession.status,
-        type: newSession.type
+      if (fetchError) {
+        toast.error('Failed to fetch online tutors: ' + fetchError.message);
+        return;
       }
-    ]);
-    if (insertError) {
-      toast.error('Failed to save instant session: ' + insertError.message);
-      return;
+
+      if (!onlineTutors || onlineTutors.length === 0) {
+        toast.error('No tutors available for instant sessions right now.');
+        return;
+      }
+
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString(); // 15 minutes from now
+
+      // Insert into the instant_requests table (no upsert to student_information here)
+      const { error: insertError } = await supabase.from('instant_requests').insert([
+        {
+          student_id: user.id,
+          student_first_name: user.first_name,
+          student_last_name: user.last_name,
+          tutor_id: null, // Initially NULL
+          subject: selectedSubject !== 'all' ? selectedSubject : 'General',
+          difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',
+          credits_offered: 10, // Adjust credits as needed
+          urgent: true,
+          status: 'pending', // Initially pending
+          expires_at: expiresAt,
+          time_requested: now.toISOString(),
+        }
+      ]);
+
+      if (insertError) {
+        toast.error('Failed to create instant request: ' + insertError.message);
+        return;
+      }
+
+      toast.success('Instant request created successfully! Waiting for a tutor to accept.');
+    } catch (err: any) {
+      toast.error('Error creating instant request: ' + (err?.message || err));
     }
-  } catch (err: any) {
-    toast.error('Error saving instant session: ' + (err?.message || err));
-    return;
-  }
-
-  toast.success(`Instant session started with ${randomTutor.first_name} ${randomTutor.last_name}!`);
-
-  // Dispatch update event
-  window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
-
-  // Enter the meeting after a short delay
-  setTimeout(() => {
-    enterMeeting(newSession.id);
-  }, 2000);
-};
-
-  const enterMeeting = (sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session) return;
-
-    toast.success(`Entering meeting with ${session.tutorName}...`);
-
-    // Update session status to ongoing
-    const updatedSessions = sessions.map(s =>
-      s.id === sessionId
-        ? { ...s, status: 'ongoing' as const }
-        : s
-    );
-    setSessions(updatedSessions);
-    localStorage.setItem('tutorSessions', JSON.stringify(updatedSessions));
-
-    window.dispatchEvent(new CustomEvent('sessionBookingUpdate'));
-
-    // Navigate to Meeting page (assumes React Router)
-    window.location.href = `/meeting/${sessionId}`;
   };
 
-  // Sort tutors: favorites first
-  const favoriteIds = loadFavorites();
-  const sortedTutors = [
-    ...tutors.filter(t => t.isFavorite),
-    ...tutors.filter(t => !t.isFavorite)
-  ];
+  const handleStartSession = async (subject: string, difficulty: string) => {
+    try {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString(); // 15 minutes from now
 
-  const filteredTutors = sortedTutors.filter(tutor => {
-    const hasAvailability = tutor.availability && tutor.availability.length > 0;
-    const matchesSubject = selectedSubject === 'all' || tutor.subjects.includes(selectedSubject);
-    const matchesSearch = searchQuery === '' ||
+      // Insert into the instant_requests table (no upsert to student_information here)
+      const { error } = await supabase.from('instant_requests').insert([
+        {
+          student_id: user.id,
+          student_first_name: user.first_name,
+          student_last_name: user.last_name,
+          subject,
+          difficulty,
+          credits_offered: 10, // Adjust credits as needed
+          urgent: true,
+          status: 'pending',
+          expires_at: expiresAt,
+          time_requested: now.toISOString(),
+          tutor_id: null
+        }
+      ]);
+
+      if (error) {
+        toast.error('Failed to create instant request: ' + error.message);
+        return;
+      }
+
+      toast.success('Instant request created successfully!');
+      setShowInstantHelpWidget(false);
+    } catch (err: any) {
+      toast.error('Error creating instant request: ' + (err?.message || err));
+    }
+  };
+
+  // Filter tutors based on search, subject, and difficulty
+  const filteredTutors = tutors.filter(tutor => {
+    const matchesSubject =
+      selectedSubject === 'all' || tutor.subjects.includes(selectedSubject);
+    const matchesDifficulty =
+      selectedDifficulty === 'all' || (tutor.qualifications && tutor.qualifications.toLowerCase().includes(selectedDifficulty.toLowerCase()));
+    const matchesSearch =
+      searchQuery.trim() === '' ||
       tutor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tutor.subjects.some(subject => subject.toLowerCase().includes(searchQuery.toLowerCase()));
-    return hasAvailability && matchesSubject && matchesSearch;
+      tutor.subjects.some(subject =>
+        subject.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    return matchesSubject && matchesDifficulty && matchesSearch;
   });
 
+  // Compute favorite tutors from tutors state
   const favoriteTutors = tutors.filter(tutor => tutor.isFavorite);
 
-  // Handle rating submit
-  const handleThankYouSubmit = async () => {
-    if (!lastSession) {
-      toast.error("No session found to submit feedback.");
+  async function quickBookFavorite(tutor: Tutor) {
+    if (!tutor.isOnline) {
+      toast.error("Tutor is currently offline.");
       return;
     }
-    try {
-      const res = await fetch("/make-server-0e871cde/session/feedback", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          sessionId: lastSession.id,
-          rating,
-          feedback,
-        }),
-      });
-      if (res.ok) {
-        toast.success("Thank you for your feedback!");
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "Failed to submit feedback.");
-      }
-    } catch (err) {
-      toast.error("Network error while submitting feedback.");
+    // Use the first available slot from the first available day
+    const firstAvailableDay = tutor.availability.find(day => day.times.length > 0);
+    if (!firstAvailableDay) {
+      toast.error("No available slots for this tutor.");
+      return;
     }
-    setShowThankYou(false);
-    // Remove thankyou param from URL
-    const params = new URLSearchParams(window.location.search);
-    params.delete("thankyou");
-    window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`);
-  };
+    const slotDate = getNextDateForWeekdayLocal(firstAvailableDay.day);
+    const slotTime = firstAvailableDay.times[0];
 
-  // Award 20 exp per completed session
-  const awardSessionExperience = async (studentId: string, currentExp: number) => {
-    const expEarned = 20;
-    const { error } = await supabase
-      .from('student_information')
-      .update({ experience: currentExp + expEarned })
-      .eq('id', studentId);
-    if (!error) {
-      toast.success(`You earned ${expEarned} experience for completing a session!`);
+    // Check if slot is already booked
+    const isBooked =
+      bookedSlots[tutor.id]?.[slotDate]?.includes(slotTime) ?? false;
+    if (isBooked) {
+      toast.error("The next available slot is already booked. Please check tutor's schedule.");
+      return;
     }
-  };
 
-  // Add state for selected subject per tutor
-  const [selectedTutorSubjects, setSelectedTutorSubjects] = useState<{ [tutorId: string]: string }>({});
+    // Check for time conflict
+    if (checkTimeConflict(slotDate, slotTime)) {
+      toast.error("Time conflict with your schedule.");
+      return;
+    }
 
-  // Helper to get booked slots for each tutor
-  const [bookedSlots, setBookedSlots] = useState<{ [tutorId: string]: { [date: string]: string[] } }>({});
+    await bookSession(tutor.id, slotDate, slotTime);
+  }
 
+  // Add state for instant requests (for tutors)
+  const [instantRequests, setInstantRequests] = useState<any[]>([]);
+  // Add state for tutor sessions
+  const [tutorSessions, setTutorSessions] = useState<any[]>([]);
+
+  // Fetch instant requests for tutors
   useEffect(() => {
-    async function fetchBookedSlots() {
+    if (user.role !== 'tutor') return;
+    const fetchInstantRequests = async () => {
       const { data, error } = await supabase
-        .from('tutor_sessions')
-        .select('tutor_id, date, time');
-      if (error || !data) return;
+        .from('instant_requests')
+        .select('*')
+        .eq('status', 'pending')
+        .is('tutor_id', null);
+      if (!error && data) setInstantRequests(data);
+    };
+    fetchInstantRequests();
+  }, [user.role]);
 
-      const slotMap: { [tutorId: string]: { [date: string]: string[] } } = {};
-
-      data.forEach((row: any) => {
-        const dateKey = row.date.split('T')[0]; // Take only YYYY-MM-DD
-        const timeKey = row.time.slice(0, 5); // "14:00"
-
-        if (!slotMap[row.tutor_id]) slotMap[row.tutor_id] = {};
-        if (!slotMap[row.tutor_id][dateKey]) slotMap[row.tutor_id][dateKey] = [];
-        slotMap[row.tutor_id][dateKey].push(timeKey);
-      });
-
-      setBookedSlots(slotMap);
-    }
-    if (tutors.length > 0) fetchBookedSlots();
-  }, [tutors]);
-
-  // Fetch sessions from Supabase for "My Sessions" tab
+  // Fetch tutor sessions for "My Sessions" tab (for tutors)
   useEffect(() => {
-    async function fetchSupabaseSessions() {
-      if (!user?.id) return;
+    if (user.role !== 'tutor') return;
+    const fetchTutorSessions = async () => {
       const { data, error } = await supabase
         .from('tutor_sessions')
         .select('*')
-        .eq('student_id', user.id)
+        .eq('tutor_id', user.id)
         .order('date', { ascending: false })
         .order('time', { ascending: false });
-      if (error) {
-        toast.error('Failed to fetch sessions: ' + error.message);
+      if (!error && data) setTutorSessions(data);
+    };
+    fetchTutorSessions();
+  }, [user.role, user.id]);
+
+  // Accept instant request handler for tutors
+  const handleAcceptInstantRequest = async (request: any) => {
+    try {
+      // 1. Update instant_requests status and assign tutor_id
+      const { error: updateError } = await supabase
+        .from('instant_requests')
+        .update({
+          status: 'accepted',
+          tutor_id: user.id
+        })
+        .eq('id', request.id);
+
+      if (updateError) {
+        toast.error('Failed to accept the request: ' + updateError.message);
         return;
       }
-      // Map data to Session interface
-      const mappedSessions = (data || []).map((s: any) => ({
-        id: s.id?.toString() ?? Date.now().toString(),
-        tutorId: s.tutor_id,
-        tutorName: `${s.tutor_first_name ?? ''} ${s.tutor_last_name ?? ''}`.trim(),
-        subject: s.subject,
-        difficulty: s.difficulty,
-        date: s.date,
-        time: s.time,
-        duration: s.duration,
-        cost: s.cost,
-        status: s.status,
-        type: s.type
-      }));
-      setSessions(mappedSessions);
-    }
-    fetchSupabaseSessions();
-  }, [user?.id]);
 
-  // Add this function above your return statement
-const quickBookFavorite = async (tutor: Tutor) => {
-  if (!tutor.isOnline) {
-    toast.error('Tutor is not online for instant session.');
-    return;
-  }
-  if (user.credits < tutor.hourlyRate) {
-    toast.error('Insufficient credits for instant session.');
-    return;
-  }
-  const now = new Date();
-const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  const newSession: Session = {
-    id: Date.now().toString(),
-    tutorId: tutor.id,
-    tutorName: tutor.name,
-    subject: tutor.subjects[0],
-    difficulty: 'Intermediate',
-    date: localDate,
-    time: localTime,
-    duration: 60,
-    cost: tutor.hourlyRate,
-    status: 'ongoing',
-    type: 'instant'
+      // 2. Insert new row into tutor_sessions
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const timeStr = now.toTimeString().slice(0, 5); // "HH:MM"
+      const { error: insertError } = await supabase
+        .from('tutor_sessions')
+        .insert([{
+          tutor_id: user.id,
+          tutor_first_name: user.first_name,
+          tutor_last_name: user.last_name,
+          student_id: request.student_id,
+          subject: request.subject,
+          difficulty: request.difficulty,
+          date: todayStr,
+          time: timeStr,
+          duration: 60,
+          status: 'ongoing',
+          type: 'instant',
+          credits_required: request.credits_offered
+        }]);
+
+      if (insertError) {
+        toast.error('Failed to create session: ' + insertError.message);
+        return;
+      }
+
+      // 3. Remove from instantRequests and refresh tutorSessions
+      setInstantRequests(prev => prev.filter(r => r.id !== request.id));
+      // Optionally, fetch again from DB:
+      const { data: sessionsData } = await supabase
+        .from('tutor_sessions')
+        .select('*')
+        .eq('tutor_id', user.id)
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+      setTutorSessions(sessionsData || []);
+
+      toast.success('Instant request accepted and session created!');
+    } catch (err: any) {
+      toast.error('Error accepting the request: ' + (err?.message || err));
+    }
   };
-  try {
-    await supabase.from('tutor_sessions').insert([{
-      tutor_id: tutor.id,
-      tutor_first_name: tutor.name.split(' ')[0],
-      tutor_last_name: tutor.name.split(' ').slice(1).join(' '),
-      student_id: user.id,
-      subject: newSession.subject,
-      difficulty: newSession.difficulty,
-      date: newSession.date,
-      time: newSession.time,
-      duration: newSession.duration,
-      cost: newSession.cost,
-      status: newSession.status,
-      type: newSession.type
-    }]);
-    await updateCreditsOnBooking(user.id, tutor.id, tutor.hourlyRate);
-    toast.success(`Instant session started with ${tutor.name}!`);
-    setLastBooked({ tutorId: tutor.id, day: newSession.date, time: newSession.time });
-    setShowBookingConfirm(true);
-    enterMeeting(newSession.id);
-  } catch (err: any) {
-    toast.error('Error booking instant session: ' + (err?.message || err));
+
+  // For tutors: show only instant requests and my sessions
+  if (user.role === 'tutor') {
+    return (
+      <div className="space-y-6">
+        {/* Instant Requests Tab for Tutors */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Instant Requests</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {instantRequests.length === 0 ? (
+              <div className="text-muted-foreground">No pending instant requests.</div>
+            ) : (
+              <div className="space-y-4">
+                {instantRequests.map(request => (
+                  <Card key={request.id}>
+                    <CardContent className="flex flex-col gap-2">
+                      <div>
+                        <b>{request.student_first_name} {request.student_last_name}</b> needs help with <b>{request.subject}</b> ({request.difficulty})
+                      </div>
+                      <div>
+                        <Button onClick={() => handleAcceptInstantRequest(request)}>
+                          Accept Request
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tutor's Sessions Tab */}
+        <Card>
+          <CardHeader>
+            <CardTitle>My Sessions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tutorSessions.length === 0 ? (
+              <div className="text-muted-foreground">No sessions yet.</div>
+            ) : (
+              <div className="space-y-4">
+                {tutorSessions.map(session => (
+                  <Card key={session.id}>
+                    <CardContent>
+                      <div>
+                        <b>{session.subject}</b> with student {session.student_id}
+                      </div>
+                      <div>
+                        {session.date} {session.time} • {session.status}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
-};
 
   return (
     <div className="space-y-6">
-      {/* Thank You Dialog */}
-      {showThankYou && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
-            <h2 className="text-2xl font-bold mb-2 text-center">Thank You!</h2>
-            <p className="mb-4 text-center">We hope you enjoyed your session{lastSession ? ` with ${lastSession.tutorName}` : ''}. Please rate your experience:</p>
-            <div className="flex justify-center mb-4">
-              {[1, 2, 3, 4, 5].map(star => (
-                <button
-                  key={star}
-                  className={`mx-1 text-2xl ${star <= rating ? 'text-yellow-400' : 'text-gray-300'}`}
-                  onClick={() => setRating(star)}
-                  aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
-                >★</button>
-              ))}
-            </div>
-            <textarea
-              className="w-full border rounded p-2 mb-4"
-              rows={3}
-              placeholder="Optional feedback..."
-              value={feedback}
-              onChange={e => setFeedback(e.target.value)}
-            />
-            <div className="flex justify-center gap-2">
-              <Button onClick={handleThankYouSubmit} className="bg-blue-600 text-white">Submit</Button>
-              <Button variant="outline" onClick={() => setShowThankYou(false)}>Skip</Button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Header */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Video className="h-6 w-6 text-blue-600" />
-            <span>Tutor Sessions</span>
-          </CardTitle>
-          <CardDescription>
-            Book sessions with qualified tutors or start instant learning
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">{sessions.length}</div>
-              <div className="text-sm text-blue-700">Total Sessions</div>
-            </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <div className="text-2xl font-bold text-green-600">{favoriteTutors.length}</div>
-              <div className="text-sm text-green-700">Favorite Tutors</div>
-            </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg">
-              <div className="text-2xl font-bold text-purple-600">{tutors.filter(t => t.isOnline).length}</div>
-              <div className="text-sm text-purple-700">Online Now</div>
-            </div>
-            <div className="text-center p-4 bg-orange-50 rounded-lg">
-              <div className="text-2xl font-bold text-orange-600">{user.credits}</div>
-              <div className="text-sm text-orange-700">Your Credits</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Instant Help Widget */}
+      <InstantHelpWidget
+        isOpen={showInstantHelpWidget}
+        onOpenChange={setShowInstantHelpWidget}
+        user={{
+          id: user.id,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          credits: user.credits,
+          role: user.role,
+        }}
+        currentUserCredits={user.credits}
+        onStartSession={handleStartSession}
+      />
 
       {/* Filters */}
       <Card>
@@ -931,7 +941,7 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
               </SelectContent>
             </Select>
 
-            <Button onClick={startInstantSession} className="w-full">
+            <Button onClick={() => setShowInstantHelpWidget(true)} className="w-full">
               <Zap className="h-4 w-4 mr-2" />
               {user.role === 'student' ? 'Get Instant Help' : 'Instant Session'}
             </Button>
@@ -990,7 +1000,7 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
                             <span>•</span>
                             <span>{tutor.totalSessions} sessions</span>
                             <span>•</span>
-                            <span>{tutor.hourlyRate} credits/hr</span>
+                            <span>{tutor.credits_earned} credits/session</span>
                           </div>
                         </div>
                       </div>
@@ -1006,7 +1016,7 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      
+
                       <div>
                         <h4 className="text-sm font-medium mb-2">Subjects</h4>
                         <Select
@@ -1190,6 +1200,18 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
                 const now = new Date();
                 const isFinished = (session.status === 'ongoing' || session.status === 'scheduled') && now > sessionEnd;
                 const notStarted = now < sessionStart;
+                function enterMeeting(id: string) {
+                  // Find the session by id
+                  const session = sessions.find(s => s.id === id);
+                  if (!session) {
+                  toast.error('Session not found.');
+                  return;
+                  }
+                  // For demo: redirect to a meeting URL (could be a video call page)
+                  // In a real app, this would be a unique meeting link per session
+                  window.open(`/meeting/${id}`, '_blank', 'noopener');
+                }
+
                 return (
                   <Card key={session.id} className="hover:shadow-md transition-shadow border-blue-200">
                     <CardHeader>
@@ -1220,7 +1242,7 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                            <span>{session.cost} credits</span>
+                            <span>{session.credits_required} credits</span>
                           </div>
                         </div>
                         <div className="flex space-x-2">
@@ -1270,12 +1292,72 @@ const localTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMin
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Instant Requests Tab for Tutors */}
+      {user.role === 'tutor' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Instant Requests</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {instantRequests.length === 0 ? (
+              <div className="text-muted-foreground">No pending instant requests.</div>
+            ) : (
+              <div className="space-y-4">
+                {instantRequests.map(request => (
+                  <Card key={request.id}>
+                    <CardContent className="flex flex-col gap-2">
+                      <div>
+                        <b>{request.student_first_name} {request.student_last_name}</b> needs help with <b>{request.subject}</b> ({request.difficulty})
+                      </div>
+                      <div>
+                        <Button onClick={() => handleAcceptInstantRequest(request)}>
+                          Accept Request
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tutor's Sessions Tab */}
+      {user.role === 'tutor' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>My Sessions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tutorSessions.length === 0 ? (
+              <div className="text-muted-foreground">No sessions yet.</div>
+            ) : (
+              <div className="space-y-4">
+                {tutorSessions.map(session => (
+                  <Card key={session.id}>
+                    <CardContent>
+                      <div>
+                        <b>{session.subject}</b> with student {session.student_id}
+                      </div>
+                      <div>
+                        {session.date} {session.time} • {session.status}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
 function getNextDateForWeekdayLocal(weekday: string) {
-  const daysOfWeek = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const today = new Date();
   const todayIndex = today.getDay();
   const targetIndex = daysOfWeek.indexOf(weekday);
@@ -1291,5 +1373,3 @@ function getNextDateForWeekdayLocal(weekday: string) {
   const day = String(nextDate.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
-
-

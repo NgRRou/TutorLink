@@ -59,7 +59,7 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploadedDocuments, setUploadedDocuments] = useState<File[]>([]);
-  const [docStatuses, setDocStatuses] = useState<Record<number, 'pending' | 'verified'>>({});
+  const [docStatuses, setDocStatuses] = useState<Record<number, 'pending' | 'uploaded'>>({});
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -236,11 +236,11 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
 
       // Update doc statuses
       const startIdx = prev.length;
-      const newStatuses: Record<number, "pending" | "verified"> = {};
+      const newStatuses: Record<number, "pending" | "uploaded"> = {};
       validFiles.forEach((_, i) => {
         newStatuses[startIdx + i] = "pending";
         setTimeout(() => {
-          setDocStatuses((statuses) => ({ ...statuses, [startIdx + i]: "verified" }));
+          setDocStatuses((statuses) => ({ ...statuses, [startIdx + i]: "uploaded" }));
         }, 2000);
       });
       setDocStatuses((statuses) => ({ ...statuses, ...newStatuses }));
@@ -471,9 +471,9 @@ export function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
                               <p className="text-sm font-medium">{file.name}</p>
                               <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
                             </div>
-                            <Badge variant={docStatuses[index] === 'verified' ? 'success' : 'secondary'} className="ml-2">
-                              {docStatuses[index] === 'verified' ? (
-                                <span className="flex items-center"><CheckCircle2 className="h-3 w-3 mr-1 text-green-600" />Verified</span>
+                            <Badge variant={docStatuses[index] === 'uploaded' ? 'success' : 'secondary'} className="ml-2">
+                              {docStatuses[index] === 'uploaded' ? (
+                                <span className="flex items-center"><CheckCircle2 className="h-3 w-3 mr-1 text-green-600" />Uploaded</span>
                               ) : (
                                 <span className="flex items-center"><Clock className="h-3 w-3 mr-1 text-yellow-600" />Pending</span>
                               )}

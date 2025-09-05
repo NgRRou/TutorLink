@@ -5,6 +5,8 @@ interface User {
   id: string;
   first_name: string;
   last_name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   password?: string;
   credits: number;
@@ -19,6 +21,7 @@ interface User {
   last_active?: string;
   favorite_tutors?: string[];
   availability?: { day: string; times: string[] }[];
+  rating?: number;
 }
 
 interface Progress {
@@ -35,25 +38,27 @@ interface Progress {
   weeklyStats: Record<string, any>;
   monthlyStats: Record<string, any>;
 }
-
 function mapToUserInterface(data: any): User {
   return {
     id: data.id,
     first_name: data.first_name ?? "",
     last_name: data.last_name ?? "",
+    firstName: data.first_name ?? "",
+    lastName: data.last_name ?? "",
     email: data.email ?? "",
-    credits: data.credits ?? 0,
+    credits: data.credits ?? data.credits_earned ?? 0,
     role: data.role ?? "student",
     experience: data.experience ?? 0,
     level: data.level ?? 1,
     total_earnings: data.total_earnings ?? 0,
-    sessions_completed: data.sessions_completed ?? 0,
+    sessions_completed: data.sessions_completed ?? data.total_sessions ?? 0,
     streak: data.streak ?? 0,
     weak_subjects: data.weak_subjects ?? [],
     preferred_learning_style: data.preferred_learning_style ?? "visual",
     last_active: data.last_active ?? null,
     favorite_tutors: data.favorite_tutors ?? [],
     availability: data.availability ?? [],
+    rating: typeof data.rating === "number" ? data.rating : undefined,
   };
 }
 
@@ -76,7 +81,6 @@ import { Notifications } from "./Notifications";
 import { Meeting } from "./Meeting";
 import { CalendarTimetable } from "./CalendarTimetable";
 import { PeerLearning } from "./PeerLearning";
-import { TutorDocumentUpload } from "./TutorDocumentUpload";
 import { useTodosContext, TodosProvider } from "../hooks/TodosContext";
 import { toast } from "sonner";
 import {
@@ -115,11 +119,11 @@ interface DashboardProps {
 interface Session {
   id: string;
   subject: string;
-  date: string; 
-  time: string; 
+  date: string;
+  time: string;
   cost: number;
-  student?: string; 
-  tutor_first_name?: string; 
+  student?: string;
+  tutor_first_name?: string;
   tutor_last_name?: string;
 }
 
@@ -226,40 +230,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      console.error("Auth error:", authError);
       setLoadingProfile(false);
       return;
     }
 
     const userId = user.id;
 
-    const { data: tutor } = await supabase
+    // Fix: select credits_earned for tutors
+    const { data: tutor, error: tutorError } = await supabase
       .from("tutor_information")
-      .select("*")
+      .select("id, first_name, last_name, email, credits_earned, role, level, rating, total_sessions, availability")
       .eq("id", userId)
       .maybeSingle();
 
     if (tutor) {
-      const mappedTutor = { ...mapToUserInterface(tutor), role: "tutor" };
-      setUser(mappedTutor);
-
+      setUser(mapToUserInterface(tutor));
       setLoadingProfile(false);
       return;
     }
 
-    const { data: student } = await supabase
+    // Fetch student profile if role is student
+    const { data: student, error: studentError } = await supabase
       .from("student_information")
       .select("*")
       .eq("id", userId)
       .maybeSingle();
 
     if (student) {
-      setUser({ ...mapToUserInterface(student), role: "student" });
+      setUser(mapToUserInterface(student));
       setLoadingProfile(false);
       return;
     }
 
-    console.warn("⚠️ No profile found for this user:", userId);
     setLoadingProfile(false);
   };
 
@@ -483,7 +485,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       case 'todo-list':
         return <TodoList user={user} />;
       case 'tutor-sessions':
-        return <TutorSessions user={user} accessToken={accessToken} />;
+        return <TutorSessions user={{ ...user, first_name: user.first_name ?? '', last_name: user.last_name ?? '' }} accessToken={accessToken} />;
       case 'become-tutor':
         return renderBecomeTutorContent();
       case 'digital-whiteboard':
@@ -505,6 +507,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
         return renderOverviewContent();
     }
   };
+
+  // Helper to calculate tutor level based on sessions_completed
+  function getTutorLevel(sessions_completed: number): number {
+    if (sessions_completed >= 30) return 3;
+    if (sessions_completed >= 15) return 2;
+    if (sessions_completed >= 5) return 1;
+    return 0;
+  }
 
   const renderOverviewContent = () => (
     <div className="space-y-6">
@@ -535,51 +545,107 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <div className="flex items-center">
               <Coins className="h-8 w-8 text-yellow-600" />
               <div className="ml-4">
-                <p className="text-sm text-muted-foreground">Credits</p>
+                <p className="text-sm text-muted-foreground">
+                  {user?.role === 'tutor' ? 'Credits Earned' : 'Credits'}
+                </p>
                 <p className="text-2xl font-bold">{user ? user.credits : '-'}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Experience */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <TrendingUp className="h-8 w-8 text-orange-500" />
-              <div className="ml-4">
-                <p className="text-sm text-muted-foreground">Experience</p>
-                <p className="text-2xl font-bold">{user ? user.experience : '-'}</p>
+        {/* For tutor: Number of Tutor Sessions */}
+        {user?.role === 'tutor' && (
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <Users className="h-8 w-8 text-blue-600" />
+                <div className="ml-4">
+                  <p className="text-sm text-muted-foreground">Tutor Sessions</p>
+                  <p className="text-2xl font-bold">{user.sessions_completed ?? '-'}</p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Level */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <TrendingUp className="h-8 w-8 text-green-600" />
-              <div className="ml-4">
-                <p className="text-sm text-muted-foreground">Level</p>
-                <p className="text-2xl font-bold">{user ? user.level : '-'}</p>
+        {/* For tutor: Ratings */}
+        {user?.role === 'tutor' && (
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <Star className="h-8 w-8 text-yellow-500" />
+                <div className="ml-4">
+                  <p className="text-sm text-muted-foreground">Ratings</p>
+                  <p className="text-2xl font-bold">
+                    {typeof user.rating === 'number' ? user.rating.toFixed(2) : '-'}
+                  </p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Streak */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Target className="h-8 w-8 text-blue-600" />
-              <div className="ml-4">
-                <p className="text-sm text-muted-foreground">Streak</p>
-                <p className="text-2xl font-bold">{user ? user.streak : '-'}</p>
+        {/* For tutor: Level */}
+        {user?.role === 'tutor' && (
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <TrendingUp className="h-8 w-8 text-green-600" />
+                <div className="ml-4">
+                  <p className="text-sm text-muted-foreground">Level</p>
+                  <p className="text-2xl font-bold">
+                    {typeof user.level === 'number'
+                      ? user.level
+                      : getTutorLevel(user.sessions_completed ?? 0)}
+                  </p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* For student: Experience, Level, Streak */}
+        {user?.role !== 'tutor' && (
+          <>
+            {/* Experience */}
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <TrendingUp className="h-8 w-8 text-orange-500" />
+                  <div className="ml-4">
+                    <p className="text-sm text-muted-foreground">Experience</p>
+                    <p className="text-2xl font-bold">{user ? user.experience : '-'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            {/* Level */}
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <TrendingUp className="h-8 w-8 text-green-600" />
+                  <div className="ml-4">
+                    <p className="text-sm text-muted-foreground">Level</p>
+                    <p className="text-2xl font-bold">{user ? user.level : '-'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            {/* Streak */}
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <Target className="h-8 w-8 text-blue-600" />
+                  <div className="ml-4">
+                    <p className="text-sm text-muted-foreground">Streak</p>
+                    <p className="text-2xl font-bold">{user ? user.streak : '-'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -596,7 +662,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
             <div className="space-y-4">
               {upcoming.length === 0 ? (
                 <div className="text-center text-muted-foreground">No upcoming sessions scheduled.</div>
-              ) : (
+              ) :
                 upcoming.map((session) => (
                   <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div>
@@ -620,7 +686,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                     </div>
                   </div>
                 ))
-              )}
+              }
             </div>
             <div className="mt-4 text-center text-sm text-muted-foreground">
               <Button variant="outline" onClick={() => handleFeatureJump('tutor-sessions')}>
@@ -630,96 +696,95 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <MessageCircle className="h-5 w-5 mr-2" />
-              Recent Activity
-            </CardTitle>
-            <CardDescription>Your learning progress and achievements</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-start space-x-3 p-3 border rounded-lg">
-                  <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{activity.action}</p>
-                    <p className="text-sm text-muted-foreground">{activity.subject}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
-                      <Badge variant="outline" className="text-xs">
-                        +{activity.xp} XP
+        {/* Recent Activity - only for student */}
+        {user?.role !== 'tutor' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <MessageCircle className="h-5 w-5 mr-2" />
+                Recent Activity
+              </CardTitle>
+              <CardDescription>Your learning progress and achievements</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {recentActivity.map((activity) => (
+                  <div key={activity.id} className="flex items-start space-x-3 p-3 border rounded-lg">
+                    <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{activity.action}</p>
+                      <p className="text-sm text-muted-foreground">{activity.subject}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-xs text-muted-foreground">{activity.time}</p>
+                        <Badge variant="outline" className="text-xs">
+                          +{activity.xp} XP
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Today's Tasks - only for student */}
+        {user?.role !== 'tutor' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Target className="h-5 w-5 mr-2" />
+                Today's Tasks
+              </CardTitle>
+              <CardDescription>Your most important tasks for today</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {todaysTodos.length === 0 ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    <p className="text-sm">No tasks due today</p>
+                    <p className="text-xs">Add tasks with due dates to see them here</p>
+                  </div>
+                ) : (
+                  filteredTodos.map((todo) => (
+                    <div
+                      key={todo.id}
+                      className="flex items-center justify-between space-x-3 p-2 border rounded"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          checked={todo.is_completed}
+                          onCheckedChange={() => handleTodoToggle(todo.id)}
+                        />
+                        <span className={`text-sm ${todo.is_completed ? 'line-through text-muted-foreground' : ''}`}>
+                          {todo.title}
+                        </span>
+                      </div>
+                      <Badge
+                        className={`text-xs ${todo.status === 'Overdue'
+                          ? 'bg-red-100 text-red-700'
+                          : todo.status === 'Today'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-gray-100 text-gray-700'
+                          }`}
+                      >
+                        {todo.status}
                       </Badge>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Today's Tasks - Now synced with TodoList */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Target className="h-5 w-5 mr-2" />
-              Today's Tasks
-            </CardTitle>
-            <CardDescription>Your most important tasks for today</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {todaysTodos.length === 0 ? (
-                <div className="text-center py-4 text-muted-foreground">
-                  <p className="text-sm">No tasks due today</p>
-                  <p className="text-xs">Add tasks with due dates to see them here</p>
-                </div>
-              ) : (
-                filteredTodos.map((todo) => (
-                  <div
-                    key={todo.id}
-                    className="flex items-center justify-between space-x-3 p-2 border rounded"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <Checkbox
-                        checked={todo.is_completed}
-                        onCheckedChange={() => handleTodoToggle(todo.id)}
-                      />
-                      <span className={`text-sm ${todo.is_completed ? 'line-through text-muted-foreground' : ''}`}>
-                        {todo.title}
-                      </span>
-                    </div>
-                    <Badge
-                      className={`text-xs ${todo.status === 'Overdue'
-                        ? 'bg-red-100 text-red-700'
-                        : todo.status === 'Today'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-gray-100 text-gray-700'
-                        }`}
-                    >
-                      {todo.status}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </div>
-            <Button
-              variant="outline"
-              className="w-full mt-4"
-              onClick={() => navigate('/todo-list')}
-            >
-              View All Tasks
-            </Button>
-          </CardContent>
-        </Card>
+                  ))
+                )}
+              </div>
+              <Button
+                variant="outline"
+                className="w-full mt-4"
+                onClick={() => navigate('/todo-list')}
+              >
+                View All Tasks
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
-
-      {/* Tutor Document Upload Widget (only for tutors) */}
-      {user?.role === 'tutor' && (
-        <TutorDocumentUpload userId={user.id} />
-      )}
 
       {/* Inline Availability - always visible for tutors */}
       {user?.role === 'tutor' && (
@@ -793,47 +858,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       )}
 
       {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-          <CardDescription>Get started with these popular features</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button
-              className="h-20 flex-col"
-              onClick={() => navigate('/ai-tutor-assistant')}
-            >
-              <Bot className="h-6 w-6 mb-2" />
-              Ask AI Tutor
-            </Button>
-            <Button
-              variant="outline"
-              className="h-20 flex-col"
-              onClick={() => navigate('/tutor-sessions')}
-            >
-              <Calendar className="h-6 w-6 mb-2" />
-              Schedule Session
-            </Button>
-            <Button
-              variant="outline"
-              className="h-20 flex-col"
-              onClick={() => navigate('/personalized-test')}
-            >
-              <FileText className="h-6 w-6 mb-2" />
-              Take Test
-            </Button>
-            <Button
-              variant="outline"
-              className="h-20 flex-col"
-              onClick={() => navigate('/credits')}
-            >
-              <Zap className="h-6 w-6 mb-2" />
-              Buy Credits
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {user?.role !== 'tutor' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>Get started with these popular features</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Button
+                className="h-20 flex-col"
+                onClick={() => navigate('/ai-tutor-assistant')}
+              >
+                <Bot className="h-6 w-6 mb-2" />
+                Ask AI Tutor
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex-col"
+                onClick={() => navigate('/tutor-sessions')}
+              >
+                <Calendar className="h-6 w-6 mb-2" />
+                Schedule Session
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex-col"
+                onClick={() => navigate('/personalized-test')}
+              >
+                <FileText className="h-6 w-6 mb-2" />
+                Take Test
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex-col"
+                onClick={() => navigate('/credits')}
+              >
+                <Zap className="h-6 w-6 mb-2" />
+                Buy Credits
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 

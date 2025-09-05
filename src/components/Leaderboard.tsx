@@ -35,6 +35,7 @@ interface User {
 interface LeaderboardProps {
   user: User;
   accessToken: string;
+  onCreditsUpdate?: (credits: number) => void; // <-- add this prop
 }
 
 interface LeaderboardEntry {
@@ -52,46 +53,78 @@ interface LeaderboardEntry {
   badge?: string;
 }
 
-export function Leaderboard({ user, accessToken }: LeaderboardProps) {
+export function Leaderboard({ user, accessToken, onCreditsUpdate }: LeaderboardProps) {
   const [activeTab, setActiveTab] = useState('monthly');
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [userRank, setUserRank] = useState<number>(0);
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userExperience, setUserExperience] = useState<number>(0);
   const [rewards, setRewards] = useState<any[]>([]);
+  const [rewardClaimed, setRewardClaimed] = useState(false);
 
-  // Fetch leaderboard and user info from Supabase
   useEffect(() => {
     async function fetchLeaderboardAndUser() {
-      // Fetch leaderboard (monthly) with explicit join key
+      // Fetch leaderboard rows (top 10 by experience)
       const { data: leaderboardRows, error: leaderboardError } = await supabase
         .from('leaderboard')
-        .select(`id, student_id, experience, rank, student:student_information!leaderboard_student_id_fkey (first_name, last_name, level, streak, sessions_completed, credits)`)
+        .select('id, student_id, experience, rank')
         .order('experience', { ascending: false })
         .limit(10);
+
       if (leaderboardError) {
+        console.error('Supabase leaderboard error:', leaderboardError);
         toast.error('Failed to load leaderboard');
         return;
       }
-      if (leaderboardRows) {
-        const entries: LeaderboardEntry[] = leaderboardRows.map((entry: any) => ({
-          id: entry.id,
-          user_id: entry.student_id, // changed from user_id to student_id
-          experience: entry.experience,
-          rank: entry.rank,
-          first_name: entry.student?.first_name || '',
-          last_name: entry.student?.last_name || '',
-          level: entry.student?.level || 1,
-          streak: entry.student?.streak || 0,
-          sessions_completed: entry.student?.sessions_completed || 0,
-          credits_earned: entry.student?.credits || 0,
-          badge: '',
-        }));
+
+      let entries: LeaderboardEntry[] = [];
+      let userLeaderboardRow: any = null;
+      if (leaderboardRows && leaderboardRows.length > 0) {
+        // Get all student_ids
+        const studentIds = leaderboardRows.map((row: any) => row.student_id);
+
+        // Fetch all student_information in one query
+        const { data: students, error: studentsError } = await supabase
+          .from('student_information')
+          .select('id, first_name, last_name, level, streak, sessions_completed, credits')
+          .in('id', studentIds);
+
+        if (studentsError) {
+          console.error('Supabase student_information error:', studentsError);
+          toast.error('Failed to load student info');
+          return;
+        }
+
+        // Map student_id to student info
+        const studentMap: Record<string, any> = {};
+        students.forEach((student: any) => {
+          studentMap[student.id] = student;
+        });
+
+        entries = leaderboardRows.map((row: any, idx: number) => {
+          if (row.student_id === user.id) userLeaderboardRow = row;
+          const student = studentMap[row.student_id] || {};
+          return {
+            id: row.id,
+            user_id: row.student_id,
+            experience: row.experience,
+            rank: idx + 1,
+            first_name: student.first_name || '',
+            last_name: student.last_name || '',
+            level: student.level || 1,
+            streak: student.streak || 0,
+            sessions_completed: student.sessions_completed || 0,
+            credits_earned: student.credits || 0,
+            badge: '',
+          };
+        });
         setLeaderboardData(entries);
+
         // Find current user's rank
         const userEntry = entries.find(e => e.user_id === user.id);
         setUserRank(userEntry ? userEntry.rank : 0);
       }
+
       // Fetch user's actual rank
       const { data: allRanks, error: allRanksError } = await supabase
         .from('leaderboard')
@@ -113,6 +146,13 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
         setUserCredits(student.credits);
         setUserExperience(student.experience);
       }
+      // Always fetch reward_claimed from leaderboard table for current user
+      const { data: claimedRow, error: claimedError } = await supabase
+        .from('leaderboard')
+        .select('reward_claimed')
+        .eq('student_id', user.id)
+        .maybeSingle();
+      setRewardClaimed(claimedRow?.reward_claimed === true);
     }
     fetchLeaderboardAndUser();
     setRewards([
@@ -154,29 +194,57 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
     }
   };
 
-  const getInitials = (firstName: string, lastName: string) => {
-    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
-  };
+  function getInitials(firstName: string, lastName: string) {
+    return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase();
+  }
 
   // Remove tabs, only show monthly leaderboard
   const claimReward = async (rank: number) => {
-    // Find reward for this rank
-    let reward = rewards.find(r => (typeof r.rank === 'number' && r.rank === rank) || (typeof r.rank === 'string' && r.rank === '4-10' && rank >= 4 && rank <= 10));
-    if (!reward) {
+    if (rewardClaimed) {
+      toast.info('You already claimed this reward.');
+      return;
+    }
+    let creditsToAdd = 0;
+    if (rank === 1) creditsToAdd = 100;
+    else if (rank === 2) creditsToAdd = 75;
+    else if (rank === 3) creditsToAdd = 50;
+    else if (rank >= 4 && rank <= 10) creditsToAdd = 25;
+    else {
       toast.error('No reward for this rank.');
       return;
     }
     // Add credits to student_information
-    const { error } = await supabase
+    const { error: updateCreditsError } = await supabase
       .from('student_information')
-      .update({ credits: userCredits + reward.credits })
+      .update({ credits: userCredits + creditsToAdd })
       .eq('id', user.id);
-    if (error) {
+
+    // Set reward_claimed to true in leaderboard table
+    const { data: leaderboardRow } = await supabase
+      .from('leaderboard')
+      .select('id')
+      .eq('student_id', user.id)
+      .maybeSingle();
+
+    if (leaderboardRow) {
+      const { error: updateLeaderboardError } = await supabase
+        .from('leaderboard')
+        .update({ reward_claimed: true })
+        .eq('id', leaderboardRow.id);
+      if (updateLeaderboardError) {
+        toast.error('Failed to update leaderboard reward status.');
+        return;
+      }
+    }
+
+    if (updateCreditsError) {
       toast.error('Failed to claim reward.');
       return;
     }
-    setUserCredits(userCredits + reward.credits);
-    toast.success(`Congratulations! You've claimed your Top ${rank} reward and earned ${reward.credits} credits!`);
+    setUserCredits(userCredits + creditsToAdd);
+    if (onCreditsUpdate) onCreditsUpdate(userCredits + creditsToAdd);
+    setRewardClaimed(true); // <-- update local state
+    toast.success(`Congratulations! You've claimed your Top ${rank} reward and earned ${creditsToAdd} credits!`);
   };
 
   return (
@@ -265,16 +333,14 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
           {/* Only show monthly leaderboard */}
           <div className="space-y-4 mt-6">
             {leaderboardData.map((entry, index) => (
-              <div
-                key={entry.id}
-                className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''}`}
-              >
+              <div key={entry.id} className={`flex items-center space-x-4 p-4 rounded-lg border transition-all hover:shadow-md ${entry.rank <= 3 ? 'border-yellow-200 bg-yellow-50' : ''}`}>
                 {/* Rank */}
-                <div className="flex-shrink-0 w-12 text-center">
+                <div className="flex-shrink-0 w-12 text-center flex flex-col items-center">
                   {getRankIcon(entry.rank)}
+                  <span className="text-xs font-semibold text-muted-foreground mt-1">#{entry.rank}</span>
                 </div>
 
-                {/* Avatar */}
+                {/* Avatar (initials only) */}
                 <Avatar className="h-10 w-10">
                   <AvatarFallback className={entry.rank <= 3 ? getRankColor(entry.rank) : 'bg-gray-100'}>
                     <span className={entry.rank <= 3 ? 'text-white' : 'text-gray-700'}>
@@ -302,16 +368,10 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
                   </div>
                 </div>
 
-                {/* Points */}
+                {/* Experience */}
                 <div className="text-right">
                   <p className="font-bold text-lg">{entry.experience.toLocaleString()}</p>
-                  <p className="text-sm text-muted-foreground">points</p>
-                </div>
-
-                {/* Credits Earned */}
-                <div className="flex items-center space-x-1 text-sm">
-                  <Coins className="h-4 w-4 text-yellow-500" />
-                  <span>{entry.credits_earned}</span>
+                  <p className="text-sm text-muted-foreground">exp</p>
                 </div>
               </div>
             ))}
@@ -331,19 +391,23 @@ export function Leaderboard({ user, accessToken }: LeaderboardProps) {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm">Progress to Top 10</span>
                 <span className="text-sm text-muted-foreground">
-                  {Math.max(0, 100 - ((userRank - 10) * 2))}%
+                  {userRank <= 10 ? '100%' : `${Math.min(100, Math.max(0, 100 - ((userRank - 10) * 2)))}%`}
                 </span>
               </div>
-              <Progress value={Math.max(0, 100 - ((userRank - 10) * 2))} className="h-2" />
+              <Progress value={userRank <= 10 ? 100 : Math.min(100, Math.max(0, 100 - ((userRank - 10) * 2)))} className="h-2" />
               <p className="text-xs text-muted-foreground mt-1">
                 {userRank <= 10 ? 'Congratulations! You\'re in the top 10!' : `${userRank - 10} ranks to go!`}
               </p>
             </div>
 
             {userRank <= 10 && (
-              <Button onClick={() => claimReward(userRank)} className="w-full">
+              <Button
+                onClick={() => claimReward(userRank)}
+                className="w-full"
+                disabled={rewardClaimed}
+              >
                 <Trophy className="h-4 w-4 mr-2" />
-                Claim Top 10 Reward
+                {rewardClaimed ? 'You already claimed this reward' : 'Claim Top 10 Reward'}
               </Button>
             )}
           </div>

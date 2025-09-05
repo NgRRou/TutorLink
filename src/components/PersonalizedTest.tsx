@@ -426,7 +426,7 @@ export function PersonalizedTest({ user, accessToken }: PersonalizedTestProps) {
     
     const { error } = await supabase
       .from('learning_progress')
-      .upsert(updatedRecord, { onConflict: ['user_id', 'subject', 'difficulty'] });
+      .upsert(updatedRecord, { onConflict: 'user_id,subject,difficulty' });
 
     if (error) console.error('Error updating learning progress:', error);
   };

@@ -7,7 +7,7 @@ import { Dashboard } from "./components/Dashboard";
 import { PersonalizedTest } from "./components/PersonalizedTest";
 import { Leaderboard } from "./components/Leaderboard";
 import { TodoList } from "./components/TodoList";
-import  ProfileSettings  from "./components/ProfileSettings";
+import ProfileSettings from "./components/ProfileSettings";
 import { TodosProvider } from "./hooks/TodosContext";
 import { PastYearPapers } from "./components/PastYearPapers";
 import { CalendarTimetable } from "./components/CalendarTimetable";
@@ -63,6 +63,34 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
   let pathname = location.pathname;
   if (pathname.startsWith('/meeting/')) pathname = '/meeting/:sessionId';
   const currentFeature = pathToFeatureId[pathname] || 'overview';
+
+  const [headerCredits, setHeaderCredits] = React.useState(user?.credits || 0);
+
+  // Fetch credits from student_information on mount and when user.id changes
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    async function fetchCredits() {
+      if (!user?.id) return;
+      const { data, error } = await supabase
+        .from('student_information')
+        .select('credits')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!error && data && typeof data.credits === 'number') {
+        setHeaderCredits(data.credits);
+      }
+    }
+    fetchCredits();
+    interval = setInterval(fetchCredits, 2000); // poll every 2 seconds
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Update credits immediately when onCreditsUpdate is called
+  const handleCreditsUpdate = (credits: number) => {
+    setHeaderCredits(credits);
+    onCreditsUpdate(credits);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
@@ -74,7 +102,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
               <FeatureNavigation
                 onFeatureSelect={() => { }}
                 currentFeature={currentFeature}
-                userCredits={user?.credits || 0}
+                userCredits={headerCredits}
                 userRole={user?.role || "student"}
               />
             </div>
@@ -82,7 +110,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
               <Notifications />
               <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-50 rounded-full">
                 <Coins className="h-4 w-4 text-yellow-600" />
-                <span className="text-sm font-medium text-yellow-700">{user?.credits || 0}</span>
+                <span className="text-sm font-medium text-yellow-700">{headerCredits}</span>
               </div>
               <div className="flex items-center space-x-3">
                 <Avatar className="h-8 w-8">
@@ -116,7 +144,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Outlet context={{ onCreditsUpdate }} />
+        <Outlet context={{ onCreditsUpdate: handleCreditsUpdate }} />
       </main>
     </div>
   );
@@ -215,7 +243,7 @@ function AppRoutes() {
         credits: tutorData.credits_earned || 0,
         role: 'tutor',
         experience: tutorData.total_sessions || 0,
-        level: 1, 
+        level: 1,
         total_earnings: tutorData.total_earnings || 0,
         streak: 0,
         sessions_completed: tutorData.total_sessions || 0,
@@ -264,7 +292,7 @@ function AppRoutes() {
     role: string;
     documents?: File[];
     subjects?: string[];
-    qualification?: string; 
+    qualification?: string;
   }) => {
     try {
       const { data, error: authError } = await supabase.auth.signUp({
@@ -304,35 +332,35 @@ function AppRoutes() {
         .insert([
           userData.role === 'student'
             ? {
-                id: userId,
-                first_name: userData.firstName,
-                last_name: userData.lastName,
-                email: userData.email,
-                credits: 0,
-                role: 'student',
-                experience: 0,
-                level: 1,
-                streak: 0,
-                sessions_completed: 0,
-                weak_subjects: [],
-                preferred_learning_style: ''
-              }
+              id: userId,
+              first_name: userData.firstName,
+              last_name: userData.lastName,
+              email: userData.email,
+              credits: 0,
+              role: 'student',
+              experience: 0,
+              level: 1,
+              streak: 0,
+              sessions_completed: 0,
+              weak_subjects: [],
+              preferred_learning_style: ''
+            }
             : {
-                id: userId,
-                first_name: userData.firstName,
-                last_name: userData.lastName,
-                email: userData.email,
-                role: 'tutor',
-                rating: 0,
-                total_sessions: 0,
-                subjects: userData.subjects || [],
-                qualification: userData.qualification || '',
-                hourly_rate: qualificationRates[userData.qualification || 'primary'],
-                is_favorite: false,
-                is_online: false,
-                credits_earned: 0,
-                is_verified: true
-              }
+              id: userId,
+              first_name: userData.firstName,
+              last_name: userData.lastName,
+              email: userData.email,
+              role: 'tutor',
+              rating: 0,
+              total_sessions: 0,
+              subjects: userData.subjects || [],
+              qualification: userData.qualification || '',
+              hourly_rate: qualificationRates[userData.qualification || 'primary'],
+              is_favorite: false,
+              is_online: false,
+              credits_earned: 0,
+              is_verified: true
+            }
         ]);
 
       if (insertError) {
@@ -466,7 +494,13 @@ function AppRoutes() {
                 <Route path="/dashboard" element={<Dashboard onLogout={handleLogout} accessToken={accessToken} />} />
                 <Route path="/ai-tutor-assistant" element={<AITutor user={user!} accessToken={accessToken} onCreditsUpdate={handleCreditsUpdate} />} />
                 <Route path="/personalized-test" element={<PersonalizedTest user={user!} accessToken={accessToken} />} />
-                <Route path="/leaderboard" element={<Leaderboard user={user!} accessToken={accessToken} />} />
+                <Route path="/leaderboard" element={
+                  <Leaderboard
+                    user={user!}
+                    accessToken={accessToken}
+                    onCreditsUpdate={handleCreditsUpdate} // <-- add this prop
+                  />
+                } />
                 <Route path="/todo-list" element={<TodoList user={user!} />} />
                 <Route path="/past-papers" element={<PastYearPapers user={user!} accessToken={accessToken} />} />
                 <Route path="/calendar-timetable" element={<CalendarTimetable user={user!} />} />
@@ -509,7 +543,7 @@ function AppRoutes() {
             ) : (
               <Route element={<Navigate to="/login" />} />
             )}
-            
+
             {/* Catch-all route */}
             <Route path="/*" element={<Navigate to={accessToken ? '/dashboard' : '/login'} />} />
           </Routes>
