@@ -10,7 +10,7 @@ export function LoadingScreen() {
             <BookOpen className="h-12 w-12 text-blue-600" />
           </div>
         </div>
-        <h2 className="mb-2">TutorPlatform</h2>
+        <h2 className="mb-2">TutorLink</h2>
         <p className="text-muted-foreground">Loading your account...</p>
       </div>
     </div>

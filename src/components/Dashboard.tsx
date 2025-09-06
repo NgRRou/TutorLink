@@ -286,6 +286,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
         return;
       }
 
+      // For tutors, fetch student names
+      if (user.role === 'tutor' && data && data.length > 0) {
+        const sessionsWithStudentNames = await Promise.all(
+          data.map(async (session: any) => {
+            let studentName = 'TBD';
+            if (session.student_id) {
+              const { data: studentInfo } = await supabase
+                .from('student_information')
+                .select('first_name,last_name')
+                .eq('id', session.student_id)
+                .single();
+              if (studentInfo) {
+                studentName = `${studentInfo.first_name} ${studentInfo.last_name}`;
+              }
+            }
+            return {
+              ...session,
+              student: studentName,
+            };
+          })
+        );
+        setUpcomingSessions(sessionsWithStudentNames);
+        return;
+      }
+
       setUpcomingSessions(data || []);
     } catch (err) {
       console.error('Unexpected error fetching sessions:', err);
@@ -676,9 +701,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                         {session.date} • {session.time}
                       </p>
                       <div className="flex items-center space-x-2 mt-1">
-                        <Badge variant="secondary" className="text-xs">
-                          {session.cost} credits
-                        </Badge>
                       </div>
                     </div>
                     <div className="text-sm text-muted-foreground">
@@ -882,7 +904,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                 Schedule Session
               </Button>
               <Button
-                variant="outline"
                 className="h-20 flex-col"
                 onClick={() => navigate('/personalized-test')}
               >
@@ -896,6 +917,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
               >
                 <Zap className="h-6 w-6 mb-2" />
                 Buy Credits
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick Actions for Tutor */}
+      {user?.role === 'tutor' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>Manage your earnings and credits</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Button
+                className="h-20 flex-col"
+                onClick={() => navigate('/tutor-sessions')}
+              >
+                <Video className="h-6 w-6 mb-2" />
+                Tutor Sessions
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex-col"
+                onClick={() => navigate('/tutor-credits')}
+              >
+                <Coins className="h-6 w-6 mb-2" />
+                Cash Redeem
+              </Button>
+              <Button
+                className="h-20 flex-col"
+                onClick={() => navigate('/tutor-credits')}
+              >
+                <Coins className="h-6 w-6 mb-2" />
+                Transfer Credit
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex-col"
+                onClick={() => navigate('/calendar-timetable')}
+              >
+                <Coins className="h-6 w-6 mb-2" />
+                Calendar
               </Button>
             </div>
           </CardContent>

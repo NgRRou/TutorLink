@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Separator } from "./ui/separator";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { useSearchParams } from "react-router-dom";
 import {
   Video,
   VideoOff,
@@ -100,6 +101,7 @@ interface WhiteboardElement {
 interface MeetingProps {
   user: User;
   meetingId?: string;
+  sessionId?: string;
   sessionInfo?: {
     subject: string;
     tutor: string;
@@ -110,30 +112,50 @@ interface MeetingProps {
 }
 
 export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: MeetingProps) {
-  // Helper to update tutor rating in Supabase
-  async function submitTutorRating(tutorEmail: string, rating: number) {
-    // Find tutor by name (fallback if email not available)
-    const { data: tutor, error: fetchError } = await supabase
-      .from('tutor_information')
-      .select('id, rating, totalSessions, name, email')
-      .eq('name', sessionInfo?.tutor || 'Sarah Chen')
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get("sessionId")!;
+
+  async function submitTutorRating(sessionId: string, rating: number) {
+    console.log("📌 Submitting rating for session:", sessionId, "with rating:", rating);
+    // 1. Get session to find tutor_id
+    const { data: session, error: sessionError } = await supabase
+      .from('tutor_sessions')
+      .select('tutor_id')
+      .eq('id', sessionId)
       .single();
 
-    if (fetchError || !tutor) {
+    console.log("➡️ Session query result:", { session, sessionError });
+
+    if (sessionError || !session?.tutor_id) {
+      alert('Could not find tutor for this session.');
+      return;
+    }
+
+    // 2. Get tutor info
+    const { data: tutor, error: tutorError } = await supabase
+      .from('tutor_information')
+      .select('id, rating, total_sessions')
+      .eq('id', session.tutor_id)
+      .single();
+
+    console.log("➡️ Tutor query result:", { tutor, tutorError });
+
+    if (tutorError || !tutor) {
       alert('Could not find tutor to rate.');
       return;
     }
 
-    // Calculate new average rating
+    // 3. Calculate new average rating
     const prevRating = tutor.rating || 0;
-    const prevCount = tutor.totalSessions || 0;
+    const prevCount = tutor.total_sessions || 0;
     const newCount = prevCount + 1;
-    const newRating = ((prevRating * prevCount) + rating) / newCount;
+    let newRating = ((prevRating * prevCount) + rating) / newCount;
+    newRating = Math.round(newRating * 10) / 10;
 
-    // Update tutor rating and session count
+    // 4. Update tutor rating and session count
     const { error: updateError } = await supabase
       .from('tutor_information')
-      .update({ rating: newRating, totalSessions: newCount })
+      .update({ rating: newRating, total_sessions: newCount })
       .eq('id', tutor.id);
 
     if (updateError) {
@@ -154,6 +176,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
     }
     requestPermissions();
   }, []);
+
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isAudioOn, setIsAudioOn] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -297,33 +320,112 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
 
   const [showEarnedCredits, setShowEarnedCredits] = useState(false);
   const [earnedCredits, setEarnedCredits] = useState<number | null>(null);
+  const [meetingEnded, setMeetingEnded] = useState(false);
+  const [showRatingPopup, setShowRatingPopup] = useState(false);
 
   const navigate = useNavigate();
 
-  const leaveMeeting = async () => {
-    if (user.role === 'tutor') {
-      let credits = sessionInfo?.cost;
-      if (!credits) {
-        const { data } = await supabase
-          .from('tutor_sessions')
-          .select('credits_required')
-          .eq('tutor_id', user.id)
-          .order('date', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        credits = data?.credits_required || 0;
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const interval = setInterval(async () => {
+      const { data: session, error } = await supabase
+        .from("tutor_sessions")
+        .select("id, is_finished, start_time, duration, tutor_id, credits_required")
+        .eq("id", sessionId)
+        .single();
+
+      if (error || !session) return;
+
+      const now = new Date();
+      const sessionEndTime = new Date(session.start_time);
+      sessionEndTime.setMinutes(sessionEndTime.getMinutes() + session.duration);
+
+      // Auto-finish session if end time passed
+      if (!session.is_finished && now >= sessionEndTime) {
+        await finishSession(session); // Unified logic for finishing
+
+        setMeetingEnded(true);
+
+        // Show rating popup for students even if they left early
+        if (user.role === "student") setShowRatingPopup(true);
+
+        clearInterval(interval);
+        return;
       }
-      setEarnedCredits(credits || 0);
+
+      // If session already finished, ensure student sees rating popup
+      if (session.is_finished) {
+        setMeetingEnded(true);
+        if (user.role === "student") setShowRatingPopup(true);
+        clearInterval(interval);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [sessionId, user.role]);
+
+  const leaveMeeting = async () => {
+  if (!sessionId) return toast.error("No session ID found.");
+
+  try {
+    // Get current session
+    const { data: session, error } = await supabase
+      .from("tutor_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .single();
+
+    if (error || !session) return toast.error("Session not found");
+
+    // Finish session if not already finished
+    if (!session.is_finished) await finishSession(session);
+
+    setMeetingEnded(true);
+
+    if (user.role === "tutor") {
+      setEarnedCredits(session.credits_required || 0);
       setShowEarnedCredits(true);
+
       setTimeout(() => {
         setShowEarnedCredits(false);
-        navigate('/tutor-sessions');
+        navigate("/tutor-sessions");
       }, 2500);
-      return;
     }
-    toast.success('Thank you for joining! Please rate your tutor.');
-    navigate('/tutor-sessions?thankyou=1');
-  };
+
+    if (user.role === "student") setShowRatingPopup(true);
+
+  } catch (err: any) {
+    toast.error("Error leaving session: " + err.message);
+  }
+};
+
+  async function finishSession(session: any) {
+    // 1. Mark session as finished
+    await supabase
+      .from("tutor_sessions")
+      .update({ is_finished: true, status: "completed" })
+      .eq("id", session.id);
+
+    // 2. Give credits to tutor
+    if (session.tutor_id) {
+      const { data: tutor, error: tutorError } = await supabase
+        .from("tutor_information")
+        .select("credits_earned, total_sessions")
+        .eq("id", session.tutor_id)
+        .single();
+
+      if (!tutorError && tutor) {
+        const newCredits = (tutor.credits_earned || 0) + (session.credits_required || 0);
+        const newTotalSessions = (tutor.total_sessions || 0) + 1;
+
+        await supabase
+          .from("tutor_information")
+          .update({ credits_earned: newCredits, total_sessions: newTotalSessions })
+          .eq("id", session.tutor_id);
+      }
+    }
+  }
 
   // Whiteboard functions
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -439,7 +541,7 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
                   style={{ fontSize: '2rem', color: rating && star <= rating ? '#f59e42' : '#ddd', background: 'none', border: 'none', cursor: 'pointer' }}
                   onClick={async () => {
                     setRating(star);
-                    await submitTutorRating(sessionInfo?.tutor || 'Sarah Chen', star);
+                    await submitTutorRating(sessionId, star);
                     setRatingSubmitted(true);
                   }}
                   aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
@@ -457,6 +559,62 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
           </div>
         </div>
       )}
+      {/* Rating Popup for Students */}
+{showRatingPopup && user.role === "student" && (
+  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50 p-4">
+    <Card className="w-full max-w-md p-6 flex flex-col items-center border border-gray-200 shadow-lg">
+      <div className="flex items-center justify-center w-14 h-14 bg-indigo-100 rounded-full mb-4">
+        <CheckCircle className="h-8 w-8 text-indigo-600" />
+      </div>
+
+      <CardHeader className="text-center w-full">
+        <CardTitle className="text-xl font-bold">Rate Your Tutor</CardTitle>
+        <CardDescription className="text-gray-600 mt-1 text-left">
+          Thank you for joining the session! Please rate your tutor:
+        </CardDescription>
+      </CardHeader>
+
+      <div className="flex justify-center gap-2 my-4">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            style={{
+              fontSize: "2rem",
+              color: rating && star <= rating ? "#f59e42" : "#ddd",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+            }}
+            onClick={async () => {
+              setRating(star);
+              await submitTutorRating(sessionId, star);
+              setRatingSubmitted(true);
+              // Redirect to tutor sessions page after 1.5s
+              setTimeout(() => navigate("/tutor-sessions"), 1500);
+            }}
+            aria-label={`Rate ${star} star${star > 1 ? "s" : ""}`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+
+      {ratingSubmitted && (
+        <div className="mb-4 text-green-600 font-medium text-center w-full">
+          Thank you! Your rating has been submitted. Redirecting...
+        </div>
+      )}
+
+      <Button
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white mt-2"
+        onClick={() => navigate("/tutor-sessions")}
+      >
+        Close
+      </Button>
+    </Card>
+  </div>
+)}
+
       {/* Meeting Header */}
       <div className="bg-gray-800 border-b border-gray-700 p-4 flex-shrink-0">
         <div className="flex items-center justify-between">
@@ -758,7 +916,6 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
       <div className="bg-gray-800 border-t border-gray-700 p-3 flex-shrink-0">
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center space-x-4">
-            <span>Meeting ID: {meetingId}</span>
             {sessionInfo && (
               <>
                 <span>•</span>

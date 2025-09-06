@@ -25,6 +25,7 @@ import { Toaster } from "./components/ui/sonner";
 import { supabase } from "./utils/supabase/client";
 import { TutorSessions } from "./components/TutorSessions";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import TutorCreditsManager from "./components/TutorCreditsManager";
 
 const CLIENT_ID = "946439376220-ne6pkqb3calao32l104bjrplpikl68n8.apps.googleusercontent.com";
 
@@ -59,6 +60,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
     '/calendar-timetable': 'calendar',
     '/todo-list': 'todo-list',
     '/profile-settings': 'profile',
+    '/tutor-credits': 'tutor-credits', // <-- Add this line
   };
   let pathname = location.pathname;
   if (pathname.startsWith('/meeting/')) pathname = '/meeting/:sessionId';
@@ -66,26 +68,35 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
 
   const [headerCredits, setHeaderCredits] = React.useState(user?.credits || 0);
 
-  // Fetch credits from student_information on mount and when user.id changes
   React.useEffect(() => {
     let interval: NodeJS.Timeout;
     async function fetchCredits() {
       if (!user?.id) return;
-      const { data, error } = await supabase
-        .from('student_information')
-        .select('credits')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (!error && data && typeof data.credits === 'number') {
-        setHeaderCredits(data.credits);
+      if (user.role === 'tutor') {
+        const { data, error } = await supabase
+          .from('tutor_information')
+          .select('credits_earned')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (!error && data && typeof data.credits_earned === 'number') {
+          setHeaderCredits(data.credits_earned);
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('student_information')
+          .select('credits')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (!error && data && typeof data.credits === 'number') {
+          setHeaderCredits(data.credits);
+        }
       }
     }
     fetchCredits();
-    interval = setInterval(fetchCredits, 2000); // poll every 2 seconds
+    interval = setInterval(fetchCredits, 2000);
     return () => clearInterval(interval);
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 
-  // Update credits immediately when onCreditsUpdate is called
   const handleCreditsUpdate = (credits: number) => {
     setHeaderCredits(credits);
     onCreditsUpdate(credits);
@@ -98,7 +109,7 @@ function Layout({ user, onLogout, accessToken, onCreditsUpdate }: { user: User, 
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
               <BookOpen className="h-8 w-8 text-blue-600" />
-              <h1>TutorPlatform</h1>
+              <h1>TutorLink</h1>
               <FeatureNavigation
                 onFeatureSelect={() => { }}
                 currentFeature={currentFeature}
@@ -525,6 +536,21 @@ function AppRoutes() {
                 />
                 <Route path="/meeting" element={<Meeting user={user!} />} />
                 <Route path="/tutor-sessions" element={<TutorSessions user={user!} accessToken={accessToken} />} />
+                <Route
+                  path="/tutor-credits"
+                  element={
+                    <TutorCreditsManager
+                      user={{
+                        id: user!.id,
+                        email: user!.email,
+                        firstName: user!.first_name,
+                        lastName: user!.last_name,
+                        role: user!.role,
+                        level: user!.level,
+                      }}
+                    />
+                  }
+                />
               </Route>
             ) : (
               <Route element={<Navigate to="/login" />} />

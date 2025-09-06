@@ -377,7 +377,7 @@ export function CreditsManager({ user, accessToken, onCreditsUpdate, onFeatureNa
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => toast.info("Please log out and sign up as a tutor to help other students!")}
+                onClick={() => toast.info("Kindly log out and sign up as a tutor to help other students!")}
               >
                 Help Now
               </Button>

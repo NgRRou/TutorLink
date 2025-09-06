@@ -108,6 +108,12 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
       ]
     },
     {
+      category: "Tutor Features",
+      items: [
+        { id: 'tutor-credits', label: 'Manage Credits', icon: Coins },
+      ]
+    },
+    {
       category: "Organization",
       items: [
         { id: 'calendar', label: 'Calendar & Timetable', icon: Calendar },
@@ -139,6 +145,7 @@ export function FeatureNavigation({ onFeatureSelect, currentFeature, userCredits
     'calendar': '/calendar-timetable',
     'todo-list': '/todo-list',
     'profile': '/profile-settings',
+    'tutor-credits': '/tutor-credits', // Add this
   };
 
   return (

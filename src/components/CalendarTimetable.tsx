@@ -72,31 +72,54 @@ export function CalendarTimetable({ user }: CalendarTimetableProps) {
       const { data: sessions, error } = await supabase
         .from('tutor_sessions')
         .select('*')
-        .eq('student_id', user.id);
+        .or(`student_id.eq.${user.id},tutor_id.eq.${user.id}`);
 
       if (error) throw error;
 
-      const addHourToTime = (time: string) => {
-        const [hour, minute] = time.split(':').map(Number);
-        const newHour = hour + 1;
-        return `${newHour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-      };
+      const tutorEvents = await Promise.all(
+        sessions.map(async (s: any) => {
+          let studentName = 'TBD';
 
-      const tutorEvents = sessions?.map((s: any) => {
-        const tutorFullName = `${s.tutor_first_name || ''} ${s.tutor_last_name || ''}`.trim();
-        return {
-          id: `session-${s.id}`,
-          title: `${s.subject} with ${tutorFullName || 'TBD'}`,
-          type: 'tutor-session' as const,
-          date: new Date(s.date),
-          startTime: s.time || '12:00',
-          endTime: addHourToTime(s.time || '12:00'),
-          subject: s.subject,
-          tutor: tutorFullName || 'TBD',
-          status: s.status === 'scheduled' ? 'upcoming' : s.status,
-          source: 'app' as const,
-        };
-      }) || [];
+          if (user.role === 'tutor' && s.student_id) {
+            const { data: studentInfo } = await supabase
+              .from('student_information')
+              .select('first_name,last_name')
+              .eq('id', s.student_id)
+              .single();
+
+            if (studentInfo) {
+              studentName = `${studentInfo.first_name} ${studentInfo.last_name}`;
+            }
+          }
+
+          const displayName =
+            user.role === 'tutor'
+              ? studentName               
+              : `${s.tutor_first_name || ''} ${s.tutor_last_name || ''}`.trim() || 'TBD'; 
+
+          const isNow = s.time?.toLowerCase() === 'now';
+          const addHourToTime = (time?: string) => {
+            if (!time || time.toLowerCase() === 'now') return 'Now';
+            const [hour, minute] = time.split(':').map(Number);
+            const newHour = hour + 1;
+            return `${newHour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+          };
+
+          return {
+            id: `session-${s.id}`,
+            title: `${s.subject} with ${displayName}`,
+            type: 'tutor-session' as const,
+            date: new Date(s.date),
+            startTime: isNow ? 'Now' : s.time,
+            endTime: isNow ? "Now" : addHourToTime(s.time),
+            subject: s.subject,
+            tutor: `${s.tutor_first_name || ''} ${s.tutor_last_name || ''}`.trim() || 'TBD',
+            student: studentName,
+            status: s.status === 'scheduled' ? 'upcoming' : s.status,
+            source: 'app' as const,
+          };
+        })
+      );
 
       const savedGoogleEvents = localStorage.getItem(`googleEvents_${user.id}`);
       const googleEvents = savedGoogleEvents ? JSON.parse(savedGoogleEvents) : [];
@@ -141,25 +164,25 @@ export function CalendarTimetable({ user }: CalendarTimetableProps) {
         const start = new Date(e.date); const [sh, sm] = e.startTime.split(':'); start.setHours(parseInt(sh), parseInt(sm));
         const end = new Date(e.date); const [eh, em] = e.endTime.split(':'); end.setHours(parseInt(eh), parseInt(em));
         return `BEGIN:VEVENT
-UID:${e.id}@tutorplatform.com
+UID:${e.id}@tutorlink.com
 DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
 DTSTART:${start.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
 DTEND:${end.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
 SUMMARY:${e.title}
-LOCATION:TutorPlatform Virtual Meeting
+LOCATION:TutorLink Virtual Meeting
 END:VEVENT`;
       }).join('\n');
 
     const icsFile = `BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//TutorPlatform//Calendar//EN
+PRODID:-//TutorLink//Calendar//EN
 ${icsContent}
 END:VCALENDAR`;
     const blob = new Blob([icsFile], { type: 'text/calendar' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'tutorplatform-calendar.ics';
+    link.download = 'tutorlink-calendar.ics';
     link.click();
     URL.revokeObjectURL(url);
     toast.success('Calendar exported successfully!');
@@ -202,7 +225,7 @@ END:VCALENDAR`;
                     {getSourceIcon(event.source)}
                   </div>
                   <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-2">
-                    <div className="flex items-center space-x-1"><Clock className="h-4 w-4" /><span>{event.startTime} - {event.endTime}</span></div>
+                    <div className="flex items-center space-x-1"><Clock className="h-4 w-4" /><span>{event.startTime === 'Now' ? 'Now' : `${event.startTime} - ${event.endTime}`}</span></div>
                     {event.subject && <div className="flex items-center space-x-1"><BookOpen className="h-4 w-4" /><span>{event.subject}</span></div>}
                   </div>
                   {event.tutor && <p className="text-sm"><span className="font-medium">Tutor:</span> {event.tutor}</p>}
@@ -288,7 +311,7 @@ END:VCALENDAR`;
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {event.date.toLocaleDateString()} • {event.startTime} - {event.endTime}
+                    {event.date.toLocaleDateString()} • {event.startTime === 'Now' ? 'Now' : `${event.startTime} - ${event.endTime}`}
                   </p>
                 </div>
                 <div className="flex items-center space-x-1">
@@ -396,17 +419,6 @@ END:VCALENDAR`;
           <CardContent>
             <div className="text-2xl font-bold">
               {events.filter(e => e.type === 'tutor-session' && e.status === 'upcoming').length}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Tests This Month</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {events.filter(e => e.type === 'test').length}
             </div>
           </CardContent>
         </Card>
