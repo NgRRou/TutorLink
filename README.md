@@ -32,7 +32,9 @@ A modern AI-powered tutoring platform built with React, Vite, Supabase, and Gemi
 - AI Tutor powered by Gemini (Google Generative Language API)
 - File upload and document analysis (PDF, images, text)
 - Subject and difficulty selection
-- Credit-based question system
+- Credit-based question system, personalized tests, review mistakes
+- Peer tutoring and instant help requests
+- Credit transfer and cash redemption system
 - Human tutor escalation for complex questions
 - Leaderboard, calendar, notifications, and more
 
