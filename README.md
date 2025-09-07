@@ -81,10 +81,10 @@ Tutoring_app/
 │   └── supabase/
 ├── .env
 ├── .gitignore
-├── schema.sql
 ├── index.html
 ├── package.json
 ├── README.md
+├── schema.sql
 └── vite.config.ts
 ```
 
