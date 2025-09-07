@@ -73,15 +73,21 @@ A modern AI-powered tutoring platform built with React, Vite, Supabase, and Gemi
 ## Project Structure
 ```
 Tutoring_app/
+├── scripts/
+│   ├── admin-insert-tutor.js
 ├── src/
 │   ├── components/
 │   ├── hooks/
 │   ├── styles/
-│   ├── utils/
-│   └── supabase/
+│   └── utils/
+├── supabase/
+│   ├── .temp/
+│   └── functions/make-server-0e871cde
 ├── .env
 ├── .gitignore
 ├── index.html
+├── LICENSE
+├── package-lock.json
 ├── package.json
 ├── README.md
 ├── schema.sql
