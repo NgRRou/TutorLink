@@ -27,6 +27,8 @@ This project is being developed by our team for the Codenection2025 competition.
 
 A modern AI-powered tutoring platform built with React, Vite, Supabase, and Gemini AI.
 
+Link to web demo video: https://youtu.be/4mkAKz-wl_E
+
 ## Features
 - User authentication and session management
 - AI Tutor powered by Gemini (Google Generative Language API)
