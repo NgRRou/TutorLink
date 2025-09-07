@@ -31,6 +31,15 @@ export function InstantHelpWidget({
 
     const handleStartSession = async (subject: string, difficulty: string) => {
         try {
+            if (!subject || subject.trim() === '') {
+                toast.error("Please select a subject before starting.");
+                return;
+            }
+            if (!difficulty || difficulty.trim() === '') {
+                toast.error("Please select a difficulty before starting.");
+                return;
+            }
+
             const now = new Date();
             const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
 

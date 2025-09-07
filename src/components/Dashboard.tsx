@@ -1,5 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { supabase } from "../utils/supabase/client";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Badge } from "./ui/badge";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Checkbox } from "./ui/checkbox";
+import { Separator } from "./ui/separator";
+import { FloatingAITutor } from "./FloatingAITutor";
+import { AITutor } from "./AITutor";
+import { CreditsManager } from "./CreditsManager";
+import { Leaderboard } from "./Leaderboard";
+import { PersonalizedTest } from "./PersonalizedTest";
+import { TodoList } from "./TodoList";
+import { PastYearPapers } from "./PastYearPapers";
+import { TutorSessions } from "./TutorSessions";
+import { CalendarTimetable } from "./CalendarTimetable";
+import { PeerLearning } from "./PeerLearning";
+import { useTodosContext, TodosProvider } from "../hooks/TodosContext";
+import { toast } from "sonner";
+import {
+  Calendar,
+  Users,
+  Star,
+  Video,
+  MessageCircle,
+  Settings,
+  Bot,
+  Coins,
+  TrendingUp,
+  Award,
+  Target,
+  Lightbulb,
+  Zap,
+  FileText,
+  Upload,
+  Share2,
+  PaintBucket,
+  User
+} from "lucide-react";
+import { projectId } from '../utils/supabase/info';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select";
 
 interface User {
   id: string;
@@ -61,55 +102,6 @@ function mapToUserInterface(data: any): User {
     rating: typeof data.rating === "number" ? data.rating : undefined,
   };
 }
-
-import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Badge } from "./ui/badge";
-import { Avatar, AvatarFallback } from "./ui/avatar";
-import { Checkbox } from "./ui/checkbox";
-import { Separator } from "./ui/separator";
-import { FeatureNavigation } from "./FeatureNavigation";
-import { FloatingAITutor } from "./FloatingAITutor";
-import { AITutor } from "./AITutor";
-import { CreditsManager } from "./CreditsManager";
-import { Leaderboard } from "./Leaderboard";
-import { PersonalizedTest } from "./PersonalizedTest";
-import { TodoList } from "./TodoList";
-import { PastYearPapers } from "./PastYearPapers";
-import { TutorSessions } from "./TutorSessions";
-import { Notifications } from "./Notifications";
-import { Meeting } from "./Meeting";
-import { CalendarTimetable } from "./CalendarTimetable";
-import { PeerLearning } from "./PeerLearning";
-import { useTodosContext, TodosProvider } from "../hooks/TodosContext";
-import { toast } from "sonner";
-import {
-  BookOpen,
-  Calendar,
-  Clock,
-  Users,
-  Star,
-  Video,
-  MessageCircle,
-  LogOut,
-  Bell,
-  Settings,
-  Bot,
-  Coins,
-  TrendingUp,
-  Award,
-  Target,
-  Lightbulb,
-  Zap,
-  FileText,
-  Upload,
-  Share2,
-  PaintBucket,
-  User
-} from "lucide-react";
-import { projectId } from '../utils/supabase/info';
-import { supabase } from '../utils/supabase/client';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select";
 
 interface DashboardProps {
   onLogout: () => void;
@@ -475,7 +467,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
       'calendar': '/calendar-timetable',
       'past-papers': '/past-papers',
       'profile': '/profile-settings',
-      'overview': '/dashboard'
+      'overview': '/dashboard',
     };
     if (featureRoutes[feature]) {
       navigate(featureRoutes[feature]);
@@ -603,7 +595,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
                 <div className="ml-4">
                   <p className="text-sm text-muted-foreground">Ratings</p>
                   <p className="text-2xl font-bold">
-                    {typeof user.rating === 'number' ? user.rating.toFixed(2) : '-'}
+                    {typeof user.rating === 'number' ? user.rating.toFixed(1) : '-'}
                   </p>
                 </div>
               </div>
@@ -675,48 +667,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Upcoming Sessions */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Video className="h-5 w-5 mr-2" />
-              Upcoming Sessions
-            </CardTitle>
-            <CardDescription>Your scheduled tutoring sessions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {upcoming.length === 0 ? (
-                <div className="text-center text-muted-foreground">No upcoming sessions scheduled.</div>
-              ) :
-                upcoming.map((session) => (
-                  <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <p className="font-medium">{session.subject}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {user?.role === 'tutor'
-                          ? `with ${session.student}`
-                          : `with ${session.tutor_first_name} ${session.tutor_last_name}`}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {session.date} • {session.time}
-                      </p>
-                      <div className="flex items-center space-x-2 mt-1">
+        {user?.role !== 'tutor' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Video className="h-5 w-5 mr-2" />
+                Upcoming Sessions
+              </CardTitle>
+              <CardDescription>Your scheduled tutoring sessions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {upcoming.length === 0 ? (
+                  <div className="text-center text-muted-foreground">No upcoming sessions scheduled.</div>
+                ) :
+                  upcoming.map((session) => (
+                    <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div>
+                        <p className="font-medium">{session.subject}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {user?.role === 'tutor'
+                            ? `with ${session.student}`
+                            : `with ${session.tutor_first_name} ${session.tutor_last_name}`}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {session.date} • {session.time}
+                        </p>
+                        <div className="flex items-center space-x-2 mt-1">
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Scheduled
                       </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      Scheduled
-                    </div>
-                  </div>
-                ))
-              }
-            </div>
-            <div className="mt-4 text-center text-sm text-muted-foreground">
-              <Button variant="outline" onClick={() => handleFeatureJump('tutor-sessions')}>
-                View All Sessions
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+                  ))
+                }
+              </div>
+              <div className="mt-4 text-center text-sm text-muted-foreground">
+                <Button variant="outline" onClick={() => handleFeatureJump('tutor-sessions')}>
+                  View All Sessions
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Recent Activity - only for student */}
         {user?.role !== 'tutor' && (
@@ -807,6 +801,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, accessToken }) =
           </Card>
         )}
       </div>
+
+      {/* Upcoming Sessions for Tutor */}
+      {user?.role === 'tutor' && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Upcoming Sessions</CardTitle>
+            <CardDescription>Your scheduled tutoring sessions</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* Flex container for sessions */}
+            <div className="flex flex-wrap gap-4">
+              {upcoming.length === 0 ? (
+                <div className="text-center text-muted-foreground w-full">
+                  No upcoming sessions scheduled.
+                </div>
+              ) : (
+                upcoming.map((session) => (
+                  <div
+                    key={session.id}
+                    className="flex-1 flex flex-col justify-between p-4 border rounded-lg bg-white shadow w-full sm:w-[48%] md:w-[30%]"
+                  >
+                    <div>
+                      <p className="font-medium">{session.subject}</p>
+                      <p className="text-sm text-muted-foreground">
+                        with {session.student}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {session.date} • {session.time}
+                      </p>
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-2">Scheduled</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* View All Sessions Button */}
+            {upcoming.length > 0 && (
+              <div className="w-full text-center mt-4">
+                <Button variant="outline" onClick={() => handleFeatureJump('tutor-sessions')}>
+                  View All Sessions
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Inline Availability - always visible for tutors */}
       {user?.role === 'tutor' && (

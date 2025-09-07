@@ -414,6 +414,18 @@ END:VCALENDAR`;
       <div className="grid md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Next Session</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {events
+                .filter(e => e.type === 'tutor-session' && e.status === 'upcoming')
+                .sort((a,b) => a.date.getTime() - b.date.getTime())[0]?.title || '-'}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Sessions</CardTitle>
           </CardHeader>
           <CardContent>

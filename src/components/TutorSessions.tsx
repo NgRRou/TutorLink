@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -13,18 +13,13 @@ import { supabase } from '../utils/supabase/client';
 import {
   Video,
   Calendar,
-  Clock,
   Star,
   Heart,
   Users,
   Search,
   Filter,
-  BookOpen,
   Zap,
   AlertTriangle,
-  MapPin,
-  Award,
-  CheckCircle,
   Play
 } from "lucide-react";
 import { TutorDashboard } from './TutorDashboard';
@@ -67,11 +62,12 @@ async function fetchSessions(studentId: string) {
 }
 
 let demoTutorId: string | undefined;
-import { supabase as supabaseClient } from '../utils/supabase/client';
 
 interface Tutor {
   id: string;
   name: string;
+  first_name?: string;
+  last_name?: string;
   avatar?: string;
   rating: number;
   totalSessions: number;
@@ -134,8 +130,6 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
   }
 
   const [showThankYou, setShowThankYou] = useState(false);
-  const [rating, setRating] = useState(5);
-  const [feedback, setFeedback] = useState("");
   const [lastSession, setLastSession] = useState<Session | null>(null);
   const [selectedTab, setSelectedTab] = useState('browse');
   const [selectedSubject, setSelectedSubject] = useState('all');
@@ -159,15 +153,6 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
 
   const difficulties = ['Beginner', 'Intermediate', 'Advanced', 'Expert'];
 
-  const mockTimetable = [
-    { day: 'Monday', time: '09:00', subject: 'Chemistry Class' },
-    { day: 'Monday', time: '14:00', subject: 'Math Study Group' },
-    { day: 'Tuesday', time: '10:00', subject: 'Physics Lab' },
-    { day: 'Wednesday', time: '15:00', subject: 'English Literature' }
-  ];
-
-  const formatTime = (time: string) => time.slice(0, 5); 
-
   useEffect(() => {
     const fetchTutors = async () => {
       const { data, error } = await supabase.from('tutor_information').select('*');
@@ -181,7 +166,9 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
         .filter(t => Array.isArray(t.availability) && t.availability.length > 0)
         .map(t => ({
           id: t.id,
-          name: t.name || `${t.first_name} ${t.last_name}`,
+          first_name: t.first_name || '',
+          last_name: t.last_name || '',
+          name: `${t.first_name} ${t.last_name}`,
           rating: t.rating || 4.0,
           totalSessions: t.total_sessions || 0,
           credits_earned: t.credits_earned || 0,
@@ -256,78 +243,6 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
       item.date === date && item.time === time
     );
   };
-
-  async function updateCreditsOnBooking(studentId: string, tutorId: string, cost: number) {
-    try {
-      const { data: studentData, error: studentFetchError } = await supabase
-        .from('student_information')
-        .select('credits')
-        .eq('id', studentId)
-        .single();
-
-      if (studentFetchError || !studentData) {
-        toast.error("Failed to fetch student credits: " + studentFetchError?.message);
-        return;
-      }
-
-      const { error: studentUpdateError } = await supabase
-        .from('student_information')
-        .update({ credits: studentData.credits - cost })
-        .eq('id', studentId);
-
-      if (studentUpdateError) {
-        toast.error("Failed to update student credits: " + studentUpdateError.message);
-        return;
-      }
-
-      const { data: tutorData, error: tutorFetchError } = await supabase
-        .from('tutor_information')
-        .select('credits_earned, total_sessions')
-        .eq('id', tutorId)
-        .single();
-
-      if (tutorFetchError || !tutorData) {
-        toast.error("Failed to fetch tutor info: " + tutorFetchError?.message);
-        return;
-      }
-
-      const { data: updatedTutor, error: tutorUpdateError } = await supabase
-        .from('tutor_information')
-        .update({
-          credits_earned: (tutorData.credits_earned || 0) + cost,
-          total_sessions: (tutorData.total_sessions || 0) + 1
-        })
-        .eq('id', tutorId)
-        .select('*');
-
-      if (tutorUpdateError) {
-        toast.error("Failed to update tutor info: " + tutorUpdateError.message);
-        return;
-      }
-
-      if (!updatedTutor) {
-        console.error('No tutor returned from update', tutorId);
-        toast.error("Failed to update tutor info: no row returned");
-        return;
-      }
-
-      setTutors(prev =>
-        prev.map(t =>
-          t.id === tutorId
-            ? {
-              ...t,
-              credits_earned: updatedTutor[0]?.credits_earned ?? 0,
-              totalSessions: updatedTutor[0]?.total_sessions ?? 0,
-            }
-            : t
-        )
-      );
-
-      toast.success("Credits and session count updated!");
-    } catch (err: any) {
-      toast.error("Error updating credits/sessions: " + err.message);
-    }
-  }
 
   const FAVORITES_KEY = user?.id ? `favoriteTutors_${user.id}` : 'favoriteTutors';
 
@@ -430,8 +345,8 @@ export function TutorSessions({ user, accessToken }: TutorSessionsProps) {
         .from('tutor_sessions')
         .insert([{
           tutor_id: tutor.id,
-          tutor_first_name: tutor.name.split(' ')[0],
-          tutor_last_name: tutor.name.split(' ').slice(1).join(' '),
+          tutor_first_name: tutor.first_name,
+          tutor_last_name: tutor.last_name,
           student_id: user.id,
           subject: selectedTutorSubjects[tutorId] || tutor.subjects[0],
           difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : 'Intermediate',

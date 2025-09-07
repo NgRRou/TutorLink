@@ -4,7 +4,6 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { ScrollArea } from "./ui/scroll-area";
 import { toast } from "sonner";
 import {
@@ -12,7 +11,6 @@ import {
   Send,
   User,
   Coins,
-  BookOpen,
   AlertTriangle,
   Users,
   Lightbulb,
@@ -24,6 +22,7 @@ import {
   Paperclip
 } from "lucide-react";
 import { projectId } from '../utils/supabase/info';
+import { supabase } from "../utils/supabase/client";
 
 interface Message {
   id: number;
@@ -42,7 +41,7 @@ interface FileAttachment {
   type: string;
   size: number;
   url?: string;
-  content?: string; // For text files or OCR content
+  content?: string;
 }
 
 interface User {
@@ -91,13 +90,6 @@ export function AITutor({ user, accessToken, onCreditsUpdate }: AITutorProps) {
     { value: 'computer-science', label: 'Computer Science' },
     { value: 'economics', label: 'Economics' },
     { value: 'general', label: 'General Studies' }
-  ];
-
-  const difficulties = [
-    { value: 'beginner', label: 'Beginner' },
-    { value: 'intermediate', label: 'Intermediate' },
-    { value: 'advanced', label: 'Advanced' },
-    { value: 'expert', label: 'Expert' }
   ];
 
   useEffect(() => {
@@ -352,8 +344,28 @@ What would you like me to explain or help you understand from this document?`;
           timestamp: new Date().toISOString(),
         };
         setMessages(prev => [...prev, aiMessage]);
-        // Simulate credits update
+
+        const newCredits = user.credits - 1;
         onCreditsUpdate(user.credits - 1);
+        try {
+          const { data, error } = await supabase
+            .from("student_information")
+            .update({ credits: newCredits })
+            .eq("id", user.id)
+            .select("credits")
+            .maybeSingle();
+
+          if (error) {
+            console.error("Error updating credits:", error);
+            toast.error("Failed to sync credits with database.");
+          } else if (data) {
+            onCreditsUpdate(data.credits);
+          }
+        } catch (err) {
+          console.error("Network error:", err);
+          toast.error("Network error while updating credits.");
+        }
+
       } else {
         let errorMsg = 'Failed to get AI response from Gemini.';
         if (data && data.error && data.error.message) {

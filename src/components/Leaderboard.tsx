@@ -35,7 +35,7 @@ interface User {
 interface LeaderboardProps {
   user: User;
   accessToken: string;
-  onCreditsUpdate?: (credits: number) => void; // <-- add this prop
+  onCreditsUpdate?: (credits: number) => void; 
 }
 
 interface LeaderboardEntry {

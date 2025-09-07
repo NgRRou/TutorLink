@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from './ui/card';
 import { Button } from './ui/button';
-import { Coins, TrendingUp } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from './ui/dialog';
+import { Coins } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 import { toast } from "sonner";
 
@@ -21,35 +22,25 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
   const [cashRedeemed, setCashRedeemed] = useState(0);
   const [transferEmail, setTransferEmail] = useState("");
   const [transferAmount, setTransferAmount] = useState(0);
-  const [tutorSummary, setTutorSummary] = useState<{
-    credits_earned: number;
-    cash_redeemed: number;
-    total_sessions: number;
-    rating: number;
-    level: number;
-  } | null>(null);
+
+  const [studentToConfirm, setStudentToConfirm] = useState<{ id: string; first_name: string; last_name: string; credits: number } | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
 
   useEffect(() => {
     async function fetchTutorSummary() {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("tutor_information")
-        .select("credits_earned, cash_redeemed, total_sessions, rating, level")
+        .select("cash_redeemed")
         .eq("id", user.id)
         .maybeSingle();
-      if (!error && data) setTutorSummary({
-        credits_earned: data.credits_earned || 0,
-        cash_redeemed: data.cash_redeemed || 0,
-        total_sessions: data.total_sessions || 0,
-        rating: typeof data.rating === "number" ? data.rating : 0,
-        level: data.level || user.level || 1,
-      });
       setCashRedeemed(data?.cash_redeemed || 0);
     }
     fetchTutorSummary();
-  }, [user.id, user.level]);
+  }, [user.id]);
 
   async function handleCashRedeem() {
     if (redeemAmount <= 0) return toast.error("Enter a valid amount.");
+
     const { data, error } = await supabase
       .from("tutor_information")
       .select("credits_earned, cash_redeemed")
@@ -72,39 +63,68 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
     toast.success(`Successfully redeemed RM${redeemAmount}!`);
   }
 
-  async function handleTransferCredit() {
+  async function handleCheckTransfer() {
     if (!transferEmail || transferAmount <= 0) return toast.error("Enter valid email and amount.");
-    const { data: tutorData, error: tutorError } = await supabase
+
+    const { data: tutorData } = await supabase
       .from("tutor_information")
       .select("credits_earned")
       .eq("id", user.id)
       .maybeSingle();
-    if (tutorError || !tutorData) return toast.error("Could not fetch tutor info.");
-    if (tutorData.credits_earned < transferAmount) return toast.error("Not enough credits.");
+    if (!tutorData || tutorData.credits_earned < transferAmount) return toast.error("Not enough credits.");
 
-    const { data: studentData, error: studentError } = await supabase
+    const { data: studentData } = await supabase
       .from("student_information")
-      .select("id, credits")
+      .select("id, first_name, last_name, credits")
       .eq("email", transferEmail)
       .maybeSingle();
-    if (studentError || !studentData) return toast.error("Account not found.");
+    if (!studentData) return toast.error("Account not found.");
 
-    // Transfer at 1:1 rate (adjust if needed)
-    const { error: tutorUpdateError } = await supabase
-      .from("tutor_information")
-      .update({ credits_earned: tutorData.credits_earned - transferAmount })
-      .eq("id", user.id);
-    const { error: studentUpdateError } = await supabase
-      .from("student_information")
-      .update({ credits: (studentData.credits || 0) + transferAmount })
-      .eq("id", studentData.id);
-
-    if (tutorUpdateError || studentUpdateError) return toast.error("Transfer failed.");
-
-    setTransferEmail("");
-    setTransferAmount(0);
-    toast.success(`Transfer successful to ${transferEmail}!`);
+    setStudentToConfirm(studentData);
+    setShowDialog(true);
   }
+
+  async function confirmTransfer() {
+  if (!studentToConfirm) return;
+
+  const studentCreditsToAdd = transferAmount * 2;
+
+  // 1. Get current tutor credits
+  const { data: tutorData, error: tutorError } = await supabase
+    .from("tutor_information")
+    .select("credits_earned")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (tutorError || !tutorData) return toast.error("Could not fetch tutor info.");
+  if (tutorData.credits_earned < transferAmount) return toast.error("Not enough credits.");
+
+  // 2. Update tutor credits
+  const { error: tutorUpdateError } = await supabase
+    .from("tutor_information")
+    .update({ credits_earned: tutorData.credits_earned - transferAmount })
+    .eq("id", user.id);
+
+  // 3. Update student credits
+  const { error: studentUpdateError } = await supabase
+    .from("student_information")
+    .update({ credits: (studentToConfirm.credits || 0) + studentCreditsToAdd })
+    .eq("id", studentToConfirm.id);
+
+  if (tutorUpdateError || studentUpdateError) {
+    toast.error("Transfer failed.");
+  } else {
+    toast.success(
+      `Successfully transferred ${studentCreditsToAdd} student credits to ${studentToConfirm.first_name} ${studentToConfirm.last_name}.`
+    );
+  }
+
+  setShowDialog(false);
+  setStudentToConfirm(null);
+  setTransferEmail("");
+  setTransferAmount(0);
+}
+
 
   return (
     <div className="max-w-3xl mx-auto py-8 space-y-6">
@@ -127,6 +147,9 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
             <p className="text-sm text-gray-600 mb-4">
               Convert your earned credits into cash. Current redeemed: <strong>RM {cashRedeemed}</strong>
             </p>
+
+            <div className="h-11 mb-4" />
+
             <input
               type="text"
               value={redeemAmount}
@@ -134,9 +157,10 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
                 const val = e.target.value;
                 if (/^\d*$/.test(val)) setRedeemAmount(Number(val));
               }}
-              className="border px-3 py-2 rounded w-full focus:outline-none focus:ring-2 focus:ring-gray-400 mb-4"
+              className="border px-3 py-2 rounded w-full focus:outline-none focus:ring-2 focus:ring-gray-400 mb-4 h-11"
               placeholder="Enter credits to redeem"
             />
+
             <div className="mt-auto">
               <Button
                 className="w-full bg-gray-800 hover:bg-black text-white"
@@ -151,15 +175,19 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
           <div className="flex-1 border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition flex flex-col">
             <h3 className="font-semibold mb-2 text-gray-800">Got a Student Account? Transfer Credits Here</h3>
             <p className="text-sm text-gray-600 mb-4">
-              Transfer credits back to your student account to continue enjoying student features!
+              Transfer credits back to your student account to continue enjoying student features with rate higher than redeem to cash! 
+              <span className="block">
+                Transfer rate: <strong>1 tutor credit → 2 student credits</strong>
+              </span>
             </p>
             <input
               type="email"
               value={transferEmail}
               onChange={(e) => setTransferEmail(e.target.value)}
-              className="border px-3 py-2 rounded w-full focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
+              className="border px-3 py-2 h-11 rounded w-full focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
               placeholder="Enter your student email"
             />
+
             <input
               type="text"
               value={transferAmount}
@@ -167,13 +195,13 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
                 const val = e.target.value;
                 if (/^\d*$/.test(val)) setTransferAmount(Number(val));
               }}
-              className="border px-3 py-2 rounded w-full focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
+              className="border px-3 py-2 h-11 rounded w-full focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
               placeholder="Credits transfer"
             />
             <div className="mt-auto">
               <Button
                 className="w-full bg-gray-800 hover:bg-black text-white"
-                onClick={handleTransferCredit}
+                onClick={handleCheckTransfer}
               >
                 Confirm Transfer
               </Button>
@@ -181,6 +209,26 @@ const TutorCreditsManager: React.FC<TutorCreditsManagerProps> = ({ user }) => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Transfer</DialogTitle>
+            <DialogDescription>
+              You are about to transfer <strong>{transferAmount}</strong> tutor credits to{" "}
+              <strong>{studentToConfirm?.first_name} {studentToConfirm?.last_name}</strong>.  
+              He / She will receive <strong>{transferAmount * 2}</strong> student credits.  
+              <br /><br />
+              Do you want to continue?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setShowDialog(false)}>Cancel</Button>
+            <Button className="bg-gray-800 text-white" onClick={confirmTransfer}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

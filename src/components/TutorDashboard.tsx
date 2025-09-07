@@ -9,17 +9,10 @@ import {
     Video,
     Calendar,
     Clock,
-    Star,
-    Users,
-    Zap,
-    UserCheck,
     MessageCircle,
     DollarSign,
-    Timer,
     User,
     Play,
-    TrendingUp,
-    Award,
     CheckCircle
 } from "lucide-react";
 import { supabase } from '../utils/supabase/client';
@@ -77,9 +70,8 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
     const [tutorInfo, setTutorInfo] = useState<{ total_sessions: number, credits_earned: number, rating: number } | null>(null);
     const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
 
-    // Helper to fetch all sessions and instant requests
     async function fetchDashboardData() {
-        // Fetch all sessions for this tutor
+        await expireOldRequests();
         const { data: sessionData, error: sessionError } = await supabase
             .from('tutor_sessions')
             .select(`*,
@@ -113,12 +105,13 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
             setSessions([]);
         }
 
-        // Fetch instant requests for tutors: only show pending requests not yet accepted
+        const now = new Date().toISOString();
         const { data: instantData, error: instantError } = await supabase
             .from('instant_requests')
             .select('*')
             .eq('status', 'pending')
-            .is('tutor_id', null);
+            .is('tutor_id', null)
+            .gt('expires_at', now);
 
         if (!instantError && instantData) {
             setInstantRequests(
@@ -137,6 +130,20 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
         } else {
             setInstantRequests([]);
             setPendingInstantRequests(0);
+        }
+    }
+
+    async function expireOldRequests() {
+        const now = new Date().toISOString();
+
+        const { error } = await supabase
+            .from('instant_requests')
+            .update({ status: 'cancelled' })
+            .eq('status', 'pending')
+            .lt('expires_at', now);
+
+        if (error) {
+            console.error('Failed to expire old requests:', error.message);
         }
     }
 
@@ -162,11 +169,9 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
         fetchTutorInfo();
     }, [user.id]);
 
-    // Accept/Reject handlers
     const handleAcceptRequest = async (id: string) => {
         setAcceptingRequestId(id);
         try {
-            // 1️⃣ Fetch the request details to get student_id and credits_offered
             const { data: requestData, error: fetchError } = await supabase
                 .from('instant_requests')
                 .select('*')
@@ -180,9 +185,8 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
             }
 
             const studentId = requestData.student_id;
-            const creditsToDeduct = requestData.credits_offered ?? 10; // default if missing
+            const creditsToDeduct = requestData.credits_offered ?? 10;
 
-            // 2️⃣ Deduct credits from the student
             const { data: studentData, error: studentError } = await supabase
                 .from('student_information')
                 .select('credits')
@@ -212,7 +216,6 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                 return;
             }
 
-            // 3️⃣ Update the request status and assign tutor_id
             const { error: acceptError } = await supabase
                 .from('instant_requests')
                 .update({
@@ -227,7 +230,6 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                 return;
             }
 
-            // 4️⃣ Optionally refresh dashboard / sessions
             await fetchDashboardData();
             toast.success('Request accepted! Student credits deducted.');
 
@@ -241,7 +243,6 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
     const handleDeclineRequest = async (id: string) => {
         setAcceptingRequestId(id);
         try {
-            // Update the instant_requests table with status declined
             const { error } = await supabase
                 .from('instant_requests')
                 .update({
@@ -256,7 +257,7 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                 return;
             }
 
-            await fetchDashboardData(); // Refresh dashboard data
+            await fetchDashboardData(); 
             toast.success('Request declined.');
         } catch (err: any) {
             toast.error('Error declining the request: ' + (err?.message || err));
@@ -264,13 +265,10 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
         setAcceptingRequestId(null);
     };
 
-    // Calculate stats
-    const totalSessions = sessions.length; // All sessions, all types
+    const totalSessions = sessions.length; 
     const completedSessions = sessions.filter(s => s.status === 'completed' || s.is_finished).length;
     const totalEarnings = tutorInfo?.credits_earned ?? 0;
-    const upcomingSessions = sessions.filter(s => s.status === 'scheduled').length;
     const pendingRequestsCount = instantRequests.length;
-    const averageRating = tutorInfo?.rating ?? 0;
 
     const stats = [
         { label: 'Total Sessions', value: totalSessions, color: 'blue', icon: Video },
@@ -325,43 +323,50 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                     </TabsTrigger>
                 </TabsList>
 
-                {/* Overview Tab */}
                 <TabsContent value="overview" className="space-y-4">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="w-full">
                         {/* Upcoming Sessions */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center space-x-2">
-                                    <Calendar className="h-5 w-5" />
-                                    <span>Upcoming Sessions</span>
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                {sessions.filter(s => s.status === 'scheduled').length === 0 ? (
-                                    <div className="text-center py-4">
-                                        <Calendar className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                        <p className="text-muted-foreground">No upcoming sessions</p>
+                        <Card className="w-full">
+                        <CardHeader>
+                            <CardTitle className="flex items-center space-x-2">
+                            <Calendar className="h-6 w-6 text-blue-600" />
+                            <span>Upcoming Sessions</span>
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {sessions.filter(s => s.status === "scheduled").length === 0 ? (
+                            <div className="text-center py-8">
+                                <Clock className="h-12 w-12 mx-auto mb-4 opacity-50 text-blue-600" />
+                                <p className="text-muted-foreground">No upcoming sessions</p>
+                                <p className="text-sm text-muted-foreground">
+                                Scheduled sessions will appear here once booked.
+                                </p>
+                            </div>
+                            ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+                                {sessions
+                                .filter(s => s.status === "scheduled")
+                                .map((session) => (
+                                    <div
+                                    key={session.id}
+                                    className="flex flex-col p-4 border rounded-lg bg-white shadow"
+                                    >
+                                    <div className="font-medium">{session.studentName}</div>
+                                    <div className="text-sm text-muted-foreground">{session.subject}</div>
+                                    <div className="text-sm text-muted-foreground">
+                                        {session.date} at {session.time}
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {sessions.filter(s => s.status === 'scheduled').map((session) => (
-                                            <div key={session.id} className="flex items-center justify-between p-3 border rounded-lg">
-                                                <div>
-                                                    <div className="font-medium">{session.studentName}</div>
-                                                    <div className="text-sm text-muted-foreground">
-                                                        {session.subject} • {session.date} at {session.time}
-                                                    </div>
-                                                </div>
-                                                <Badge variant="outline">{session.cost} credits</Badge>
-                                            </div>
-                                        ))}
+                                    <div className="mt-4">
+                                        <Badge variant="outline">{session.cost} credits</Badge>
                                     </div>
-                                )}
-                            </CardContent>
+                                    </div>
+                                ))}
+                            </div>
+                            )}
+                        </CardContent>
                         </Card>
-                        {/* ...other overview cards if needed... */}
                     </div>
-                </TabsContent>
+                    </TabsContent>
 
                 {/* My Sessions Tab */}
                 <TabsContent value="booked-sessions" className="space-y-4">
@@ -380,7 +385,6 @@ export function TutorDashboard({ user, accessToken, onCreditsUpdate }: TutorDash
                                     <CardHeader>
                                         <div className="flex items-center justify-between">
                                             <div>
-                                                {/* Always show student first and last name */}
                                                 <h3 className="font-semibold text-lg">
                                                     {session.studentName}
                                                 </h3>

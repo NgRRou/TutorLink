@@ -8,46 +8,27 @@ import { Input } from "./ui/input";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Separator } from "./ui/separator";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { useSearchParams } from "react-router-dom";
 import {
   Video,
   VideoOff,
   Mic,
   MicOff,
-  Phone,
   PhoneOff,
-  Users,
   MessageCircle,
-  Share,
   Monitor,
   PaintBucket,
-  FileText,
-  Upload,
-  Download,
-  Settings,
-  MoreVertical,
-  Maximize,
   Minimize,
   Clock,
-  Calendar,
-  Target,
-  Zap,
   CheckCircle,
-  AlertCircle,
-  Volume2,
-  VolumeX,
-  RotateCcw,
   Save,
   Trash2,
-  Copy,
   Eye,
   EyeOff,
   MousePointer,
   Square,
   Circle,
   Type,
-  Minus,
   ArrowRight,
   Palette,
   Eraser
@@ -116,43 +97,34 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
   const sessionId = searchParams.get("sessionId")!;
 
   async function submitTutorRating(sessionId: string, rating: number) {
-    console.log("📌 Submitting rating for session:", sessionId, "with rating:", rating);
-    // 1. Get session to find tutor_id
     const { data: session, error: sessionError } = await supabase
       .from('tutor_sessions')
       .select('tutor_id')
       .eq('id', sessionId)
       .single();
 
-    console.log("➡️ Session query result:", { session, sessionError });
-
     if (sessionError || !session?.tutor_id) {
       alert('Could not find tutor for this session.');
       return;
     }
 
-    // 2. Get tutor info
     const { data: tutor, error: tutorError } = await supabase
       .from('tutor_information')
       .select('id, rating, total_sessions')
       .eq('id', session.tutor_id)
       .single();
 
-    console.log("➡️ Tutor query result:", { tutor, tutorError });
-
     if (tutorError || !tutor) {
       alert('Could not find tutor to rate.');
       return;
     }
 
-    // 3. Calculate new average rating
     const prevRating = tutor.rating || 0;
     const prevCount = tutor.total_sessions || 0;
     const newCount = prevCount + 1;
     let newRating = ((prevRating * prevCount) + rating) / newCount;
     newRating = Math.round(newRating * 10) / 10;
 
-    // 4. Update tutor rating and session count
     const { error: updateError } = await supabase
       .from('tutor_information')
       .update({ rating: newRating, total_sessions: newCount })
@@ -162,10 +134,8 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
       alert('Failed to submit rating.');
     }
   }
-  // Rating state for thank you dialog
   const [rating, setRating] = useState<number | null>(null);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  // Ask for camera/mic permissions on mount
   useEffect(() => {
     async function requestPermissions() {
       try {
@@ -191,7 +161,6 @@ export function Meeting({ user, meetingId = 'demo-meeting', sessionInfo }: Meeti
       isScreenSharing: false,
       joinedAt: new Date().toISOString()
     },
-    // Add mock student if user is tutor
     ...(user.role === 'tutor'
       ? [{
         id: '2',
