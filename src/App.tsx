@@ -366,8 +366,6 @@ function AppRoutes() {
               total_sessions: 0,
               subjects: userData.subjects || [],
               qualification: userData.qualification || '',
-              hourly_rate: qualificationRates[userData.qualification || 'primary'],
-              is_favorite: false,
               is_online: false,
               credits_earned: 0,
               is_verified: true
